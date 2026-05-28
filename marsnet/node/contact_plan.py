@@ -8,14 +8,14 @@ from typing import Optional
 
 @dataclass
 class ContactEntry:
-    id: str               # "relay:1"
-    created_by: str       # node name that created this contact
-    from_node: str        # TCP initiator
-    to_node: str          # TCP acceptor
-    phase: float          # seconds from sim_start when first window opens
-    period: float         # seconds between window starts
-    duration: float       # seconds each window stays open
-    rate_bps: int         # bits per second
+    id: str                 # "relay:1"
+    created_by: str         # node name that created this contact
+    from_node: str          # TCP initiator
+    to_node: str            # TCP acceptor
+    phase: float            # seconds from sim_start when first window opens
+    period: float           # seconds between window starts
+    duration: float         # seconds each window stays open
+    rate_bps: int           # bits per second
     status: str = "active"  # "active" | "cancelled"
 
     @property
