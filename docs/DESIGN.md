@@ -168,33 +168,45 @@ Output:
 
 ### Algorithm
 
+**Contacts are bidirectional for data.** `from_node`/`to_node` only designate the
+TCP initiator and acceptor (see §4). Once a contact's window is open, the
+connection is full-duplex (see §8, §10), so a bundle may travel in *either*
+direction across that window. CGR therefore expands each window into **two
+directed edges** — one per direction — and a routed bundle may flow opposite to
+the contact's `from→to`. This is what lets `rover_c`/`rover_d`, whose only
+contacts are `relay → rover_c`/`relay → rover_d`, send bundles back to base via
+the relay.
+
 ```
 1. Enumerate all contact windows within a planning horizon (3600s default)
    for each active contact, for each window (start, end) in the horizon:
      capacity = rate_bps × duration / 8
      remaining = capacity - volume_used.get((contact_id, window_start), 0)
-     if remaining > 0: add (window_end, window_start, contact, remaining) to list
+     if remaining > 0:
+       # one window → two directed edges (sender, receiver)
+       add (window_end, window_start, contact, from_node, to_node) to list
+       add (window_end, window_start, contact, to_node, from_node) to list
 
 2. Sort the list by window_end (ascending)
+   (sort by an explicit (window_end, window_start) key — a ContactEntry is not
+    orderable, so it must not appear in the sort key)
 
 3. Initialize:
      earliest[source] = current_time
      earliest[all other nodes] = ∞
-     prev_contact[node] = None for all nodes
+     prev[node] = None for all nodes      # prev[node] = (contact, sender)
 
-4. For each (window_end, window_start, contact, remaining) in sorted list:
-     fn = contact.from_node
-     tn = contact.to_node
-     if fn not in earliest: skip           # can't reach transmitting node
-     departure = max(window_start, earliest[fn])
-     if departure >= window_end: skip      # bundle can't make it in time
+4. For each (window_end, window_start, contact, sender, receiver) in sorted list:
+     if sender not in earliest: skip       # can't reach transmitting node yet
+     departure = max(window_start, earliest[sender])
+     if departure >= window_end: skip      # bundle can't make it before close
      arrival = departure                   # no OWLT (propagation delay = 0)
-     if arrival < earliest[tn]:
-         earliest[tn] = arrival
-         prev_contact[tn] = contact
+     if arrival < earliest[receiver]:
+         earliest[receiver] = arrival
+         prev[receiver] = (contact, sender)
 
-5. Walk prev_contact[] backwards from destination to source
-   to identify the first hop contact.
+5. Walk prev[] backwards from destination to source (following the stored
+   sender at each step) to identify the first hop contact.
 
 6. Return CGRResult(first_hop_contact.id, earliest[destination])
 ```
