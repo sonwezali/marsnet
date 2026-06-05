@@ -15,7 +15,7 @@ CHUNK_SIZE = 512  # bytes per fragment
 def fragment_image(
     src: str, dst: str, ttl: float, image_id: str,
     crypto: CryptoManager, chunk_size: int = CHUNK_SIZE,
-    image_path: str = None, raw_data: bytes = None,
+    image_path: Optional[str] = None, raw_data: Optional[bytes] = None,
 ) -> list[Bundle]:
     if raw_data is None:
         with open(image_path, "rb") as f:
@@ -43,18 +43,14 @@ def fragment_image(
 
 class ImageAssembler:
     def __init__(self, store: BundleStore, crypto: CryptoManager,
-                 output_dir: str):
+                 output_dir: str, chunk_size: int = CHUNK_SIZE):
         self.store = store
         self.crypto = crypto
         self.output_dir = output_dir
+        self.chunk_size = chunk_size
         self._lock = threading.Lock()
 
     def on_fragment(self, image_id: str) -> Optional[str]:
-        """
-        Called whenever a new fragment for image_id lands in the store.
-        If all fragments are present, reassembles, decrypts, writes to disk.
-        Returns output path on completion, None if still incomplete.
-        """
         with self._lock:
             fragments = [b for b in self.store.all()
                          if b.image_id == image_id]
@@ -63,23 +59,12 @@ class ImageAssembler:
 
             total_size = fragments[0].total_size
             offsets = {b.fragment_offset for b in fragments}
-            
-            # Determine chunk_size from fragments
-            if len(fragments) > 1:
-                sorted_f = sorted(fragments, key=lambda b: b.fragment_offset)
-                chunk_size = sorted_f[1].fragment_offset - sorted_f[0].fragment_offset
-            else:
-                # Single fragment: use standard chunk size to calculate expected count
-                chunk_size = CHUNK_SIZE
-
-            # Calculate expected number of fragments
-            num_fragments = math.ceil(total_size / chunk_size)
-            expected_offsets = {i * chunk_size for i in range(num_fragments)}
+            num_fragments = math.ceil(total_size / self.chunk_size)
+            expected_offsets = {i * self.chunk_size for i in range(num_fragments)}
 
             if offsets != expected_offsets:
-                return None  # still waiting for fragments
+                return None
 
-            # Reassemble
             sorted_f = sorted(fragments, key=lambda b: b.fragment_offset)
             raw = b"".join(self.crypto.decrypt(b.data) for b in sorted_f)
             raw = raw[:total_size]

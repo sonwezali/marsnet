@@ -54,6 +54,15 @@ def main():
     reporter = DashboardReporter(cfg.dashboard_url, cfg.name)
     reporter.start()
 
+    broadcaster = HELLOBroadcaster(cfg.udp_port, cfg.port, cfg.name, plan, sim_start)
+    assembler = ImageAssembler(bundle_store, crypto,
+                               output_dir=cfg.image_dir or ".")
+    ttl_reaper = TTLReaper(bundle_store,
+                           on_drop=lambda bid: reporter.post("bundle_dropped",
+                                                             {"bundle_id": bid}))
+
+    # contact_mgr is defined after the callbacks due to circular dependency;
+    # Python's late-binding closures resolve the reference at call time.
     def on_plan_update(updated_plan: ContactPlan) -> None:
         contact_mgr.rebuild_on_plan_update()
         reporter.post("plan_updated", {"version": updated_plan.version,
@@ -83,7 +92,7 @@ def main():
         dashboard_reporter=reporter,
     )
 
-    def on_contact_connection(sock, contact_id, peer_name, peer_handshake=None):
+    def on_contact_connection(sock, contact_id, _peer_name, peer_handshake=None):
         close_event = threading.Event()
         contact = plan.contact_by_id(contact_id)
         end_time_sim = contact.next_window(after=time.time() - sim_start)[1] \
@@ -91,20 +100,18 @@ def main():
         contact_mgr.accept_inbound(sock, contact_id, close_event, end_time_sim,
                                    peer_handshake=peer_handshake)
 
+    def on_plan_received(received: ContactPlan) -> None:
+        if plan.merge(received):
+            on_plan_update(plan)
+
     tcp_listener = TCPListener(
         host=cfg.host, port=cfg.port,
         node_name=cfg.name, plan=plan,
         on_contact_connection=on_contact_connection,
-        on_plan_received=lambda p: on_plan_update(plan) if plan.merge(p) else None,
+        on_plan_received=on_plan_received,
         sim_start=sim_start,
     )
     udp_listener = UDPListener(cfg.udp_port, cfg.name, plan, sim_start)
-    broadcaster = HELLOBroadcaster(cfg.udp_port, cfg.port, cfg.name, plan, sim_start)
-    ttl_reaper = TTLReaper(bundle_store,
-                           on_drop=lambda bid: reporter.post("bundle_dropped",
-                                                             {"bundle_id": bid}))
-    assembler = ImageAssembler(bundle_store, crypto,
-                               output_dir=cfg.image_dir or ".")
 
     tcp_listener.start()
     udp_listener.start()

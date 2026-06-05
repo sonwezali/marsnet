@@ -2,7 +2,7 @@ from __future__ import annotations
 import json
 import math
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 
@@ -106,23 +106,20 @@ class ContactPlan:
     def merge(self, other: ContactPlan) -> bool:
         """
         Merge other plan into self. Rules:
-        - Take higher-version as base.
         - Cancellations from either side always win (one-way: active→cancelled).
         - New contacts from either side are added.
         Returns True if anything changed.
         """
+        other_contacts = {c.id: c for c in other.contacts}
         changed = False
         with self._lock:
-            # Add any contacts present in other but not in self
-            for cid, entry in other._contacts.items():
+            for cid, entry in other_contacts.items():
                 if cid not in self._contacts:
                     self._contacts[cid] = entry
                     changed = True
-                else:
-                    # Propagate cancellation
-                    if entry.status == "cancelled" and self._contacts[cid].status == "active":
-                        self._contacts[cid].status = "cancelled"
-                        changed = True
+                elif entry.status == "cancelled" and self._contacts[cid].status == "active":
+                    self._contacts[cid].status = "cancelled"
+                    changed = True
             if changed:
                 self.version = max(self.version, other.version) + 1
         return changed

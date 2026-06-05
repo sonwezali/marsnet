@@ -34,7 +34,10 @@ class UDPListener:
                 data, addr = sock.recvfrom(4096)
             except socket.timeout:
                 continue
-            msg = proto.decode(data)
+            try:
+                msg = proto.decode(data)
+            except (ValueError, KeyError):
+                continue
             if msg.type == "HELLO":
                 self._respond(addr[0], msg)
         sock.close()

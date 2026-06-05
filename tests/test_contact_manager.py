@@ -110,3 +110,39 @@ def test_rebuild_on_plan_update():
     plan.add_contact(make_entry("rover_a:2", phase=50.0, period=3600.0))
     mgr.rebuild_on_plan_update()
     assert len(mgr._timers) > initial_timer_count
+
+
+def test_reassign_does_not_duplicate_unchanged_route():
+    mgr, plan, store = make_manager()
+    mgr.start()
+    b = make_bundle()
+    mgr.inject_bundle(b)
+    assert b.next_hop_contact == "base:1"
+    # Simulate an open queue for the current hop
+    import queue
+    q = queue.Queue()
+    q.put(b)  # bundle already in queue
+    with mgr._manager_lock:
+        mgr._outbound_queues["base:1"] = q
+    # Trigger reassignment — route hasn't changed
+    mgr._reassign_all_bundles()
+    # Queue should still have exactly 1 item (no duplicate)
+    assert q.qsize() == 1
+
+
+def test_reassign_updates_hop_on_contact_failure():
+    # Two contacts: one via rover_a→base, another via rover_a→relay
+    contacts = [
+        make_entry("base:1", from_node="rover_a", to_node="base",
+                   phase=10.0, period=3600.0, duration=20.0),
+    ]
+    mgr, plan, store = make_manager(contacts=contacts)
+    mgr.start()
+    b = make_bundle()
+    mgr.inject_bundle(b)
+    assert b.next_hop_contact == "base:1"
+    # Cancel the only contact
+    mgr._states["base:1"] = ContactState.OPEN
+    mgr.report_failure("base:1")
+    # No route available now
+    assert b.next_hop_contact is None

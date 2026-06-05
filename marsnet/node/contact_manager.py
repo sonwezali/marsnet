@@ -4,7 +4,7 @@ import socket
 import threading
 import time
 from enum import Enum, auto
-from typing import Callable, Optional
+from typing import Callable
 
 from marsnet.node.contact_plan import ContactEntry, ContactPlan
 from marsnet.node.bundle_store import BundleStore
@@ -61,7 +61,7 @@ class ContactManager:
                 t.cancel()
             self._timers.clear()
             self._rebuild_timers()
-            self._reassign_all_bundles()
+        self._reassign_all_bundles()
 
     def _rebuild_timers(self) -> None:
         now = self.sim_time()
@@ -76,7 +76,7 @@ class ContactManager:
                 close_event = threading.Event()
                 t_open = threading.Timer(
                     delay_open, self._open_contact,
-                    args=(contact, ws, we, close_event)
+                    args=(contact, we, close_event)
                 )
                 t_close = threading.Timer(delay_close, close_event.set)
                 t_open.daemon = True
@@ -85,7 +85,7 @@ class ContactManager:
                 t_open.start()
                 t_close.start()
 
-    def _open_contact(self, contact: ContactEntry, ws: float, we: float,
+    def _open_contact(self, contact: ContactEntry, we: float,
                       close_event: threading.Event) -> None:
         with self._states_lock:
             self._states[contact.id] = ContactState.OPEN
@@ -134,6 +134,7 @@ class ContactManager:
 
         self.plan.cancel_contact(contact_id)
         self.on_plan_update(self.plan)
+        self._reassign_all_bundles()
 
         if self.reporter:
             self.reporter.post("contact_failed", {
@@ -143,13 +144,20 @@ class ContactManager:
     def _reassign_all_bundles(self) -> None:
         snapshot = self.plan.snapshot()
         now = self.sim_time()
+        reroutes = []
         for bundle in self.bundle_store.all():
+            old_hop = bundle.next_hop_contact
             result = cgr_route(snapshot, bundle.src, bundle.dst, now,
                                self.sim_start)
             new_hop = result.next_hop_contact if result else None
-            self.bundle_store.update_next_hop(bundle.bundle_id, new_hop)
-            if new_hop and new_hop in self._outbound_queues:
-                self._outbound_queues[new_hop].put(bundle)
+            if new_hop != old_hop:
+                reroutes.append((bundle, new_hop))
+        with self._manager_lock:
+            for bundle, new_hop in reroutes:
+                bundle.next_hop_contact = new_hop
+                self.bundle_store.update_next_hop(bundle.bundle_id, new_hop)
+                if new_hop and new_hop in self._outbound_queues:
+                    self._outbound_queues[new_hop].put(bundle)
 
     def accept_inbound(self, sock, contact_id: str, close_event: threading.Event,
                        end_time: float, peer_handshake=None) -> None:
@@ -174,14 +182,11 @@ class ContactManager:
         t.start()
 
     def inject_bundle(self, bundle) -> None:
+        snapshot = self.plan.snapshot()
+        result = cgr_route(snapshot, bundle.src, bundle.dst,
+                           self.sim_time(), self.sim_start)
+        bundle.next_hop_contact = result.next_hop_contact if result else None
         with self._manager_lock:
-            snapshot = self.plan.snapshot()
-            result = cgr_route(snapshot, bundle.src, bundle.dst,
-                               self.sim_time(), self.sim_start)
-            if result:
-                bundle.next_hop_contact = result.next_hop_contact
-            else:
-                bundle.next_hop_contact = None
             self.bundle_store.insert(bundle)
             if bundle.next_hop_contact and \
                bundle.next_hop_contact in self._outbound_queues:

@@ -27,7 +27,7 @@ def test_fragment_reassemble_roundtrip():
         store = BundleStore()
         for b in bundles:
             store.insert(b)
-        assembler = ImageAssembler(store, crypto, out_dir)
+        assembler = ImageAssembler(store, crypto, out_dir, chunk_size=CHUNK)
         for b in bundles:
             result = assembler.on_fragment(b.image_id)
         assert result is not None
@@ -48,6 +48,23 @@ def test_partial_returns_none():
         store.insert(bundles[0])
         store.insert(bundles[1])
         store.insert(bundles[3])
-        assembler = ImageAssembler(store, crypto, out_dir)
+        assembler = ImageAssembler(store, crypto, out_dir, chunk_size=CHUNK)
         result = assembler.on_fragment("img002")
+        assert result is None
+
+
+def test_non_adjacent_fragments_not_prematurely_complete():
+    crypto = CryptoManager.generate()
+    raw = make_image_data(200)
+    bundles = fragment_image(raw_data=raw, src="rover_a", dst="base",
+                             ttl=120.0, image_id="img003",
+                             chunk_size=CHUNK, crypto=crypto)
+    # bundles has 4 fragments at offsets 0, 64, 128, 192
+    with tempfile.TemporaryDirectory() as out_dir:
+        store = BundleStore()
+        # Insert only non-adjacent fragments 0 and 128
+        store.insert(bundles[0])
+        store.insert(bundles[2])
+        assembler = ImageAssembler(store, crypto, out_dir, chunk_size=CHUNK)
+        result = assembler.on_fragment("img003")
         assert result is None
