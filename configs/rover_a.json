@@ -1,0 +1,10 @@
+{
+  "name": "rover_a",
+  "host": "0.0.0.0",
+  "port": 7002,
+  "udp_port": 7000,
+  "plan_path": "plans/initial_plan.json",
+  "key_path": "shared.key",
+  "dashboard_url": "http://127.0.0.1:8000",
+  "image_dir": "received_images"
+}
