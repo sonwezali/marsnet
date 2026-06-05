@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>MarsNet Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="header"><h1>🔴 MarsNet</h1><span id="status">connecting…</span></div>
+  <div id="main">
+    <canvas id="map" width="900" height="600"></canvas>
+    <div id="sidebar">
+      <div id="image-panel">
+        <h2>Incoming Image</h2>
+        <canvas id="img-preview" width="256" height="256"></canvas>
+        <div id="img-progress">waiting…</div>
+      </div>
+      <div id="log-panel">
+        <h2>Event Log</h2>
+        <ul id="log"></ul>
+      </div>
+    </div>
+  </div>
+  <script src="mars.js"></script>
+</body>
+</html>
