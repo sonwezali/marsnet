@@ -92,7 +92,7 @@ class ContactManager:
             # Resolve host for contact.to_node from config (injected at startup)
             host, port = self._resolve(contact.to_node)
             sock = socket.create_connection((host, port), timeout=5.0)
-        except OSError:
+        except OSError as e:
             self.report_failure(contact.id)
             return
 
@@ -100,7 +100,8 @@ class ContactManager:
         self._outbound_queues[contact.id] = q
 
         # Enqueue any bundles already routed to this contact
-        for bundle in self.bundle_store.get_by_contact(contact.id):
+        bundles = self.bundle_store.get_by_contact(contact.id)
+        for bundle in bundles:
             q.put(bundle)
 
         handler = ConnectionHandler(
@@ -154,7 +155,7 @@ class ContactManager:
                 self._outbound_queues[new_hop].put(bundle)
 
     def accept_inbound(self, sock, contact_id: str, close_event: threading.Event,
-                       end_time: float) -> None:
+                       end_time: float, peer_handshake=None) -> None:
         """Called by TCPListener when an inbound scheduled connection arrives."""
         q = queue.Queue()
         for bundle in self.bundle_store.get_by_contact(contact_id):
@@ -169,6 +170,7 @@ class ContactManager:
             on_bundle_received=self.on_bundle_received,
             sim_start=self.sim_start,
             dashboard_reporter=self.reporter,
+            peer_handshake=peer_handshake,
         )
         t = threading.Thread(target=handler.run, daemon=True,
                              name=f"conn-{contact_id}-in")

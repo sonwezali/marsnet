@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/bin/python *)",
+      "Bash(.venv/bin/pytest *)",
+      "Bash(timeout *)"
+    ]
+  },
+  "$version": 4
+}

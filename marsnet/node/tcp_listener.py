@@ -61,7 +61,7 @@ class TCPListener:
         if msg.type == "HANDSHAKE":
             # Scheduled contact window opened by remote Contact Manager
             contact_id = msg.payload.get("contact_id", "unknown")
-            self.on_contact_connection(conn, contact_id, msg.sender)
+            self.on_contact_connection(conn, contact_id, msg.sender, msg)
 
         elif msg.type == "PLAN":
             # Response to our HELLO broadcast

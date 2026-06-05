@@ -55,6 +55,7 @@ def main():
 
     def on_bundle_received(bundle) -> None:
         if bundle.dst == cfg.name:
+            bundle_store.insert(bundle)  # Insert before assembling
             assembler.on_fragment(bundle.image_id)
             reporter.post("fragment_received", {
                 "image_id": bundle.image_id,
@@ -80,13 +81,14 @@ def main():
         return host, int(port)
     contact_mgr._resolve = resolve
 
-    def on_contact_connection(sock, contact_id, peer_name):
+    def on_contact_connection(sock, contact_id, peer_name, peer_handshake=None):
         import threading
         close_event = threading.Event()
         contact = plan.contact_by_id(contact_id)
         end_time_sim = contact.next_window(after=time.time() - sim_start)[1] \
                        if contact else (time.time() - sim_start + 30)
-        contact_mgr.accept_inbound(sock, contact_id, close_event, end_time_sim)
+        contact_mgr.accept_inbound(sock, contact_id, close_event, end_time_sim,
+                                   peer_handshake=peer_handshake)
 
     tcp_listener = TCPListener(
         host=cfg.host, port=cfg.port,

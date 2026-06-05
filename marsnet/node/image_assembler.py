@@ -63,14 +63,14 @@ class ImageAssembler:
 
             total_size = fragments[0].total_size
             offsets = {b.fragment_offset for b in fragments}
-
+            
             # Determine chunk_size from fragments
             if len(fragments) > 1:
                 sorted_f = sorted(fragments, key=lambda b: b.fragment_offset)
                 chunk_size = sorted_f[1].fragment_offset - sorted_f[0].fragment_offset
             else:
-                # Single fragment: it must cover the entire file
-                chunk_size = total_size
+                # Single fragment: use standard chunk size to calculate expected count
+                chunk_size = CHUNK_SIZE
 
             # Calculate expected number of fragments
             num_fragments = math.ceil(total_size / chunk_size)
