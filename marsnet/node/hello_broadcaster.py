@@ -19,8 +19,15 @@ class HELLOBroadcaster:
         self.sim_start = sim_start
         self.interval = interval
         self._stop = threading.Event()
+        self._running = False
+        self._lock = threading.Lock()
 
-    def start(self) -> threading.Thread:
+    def start(self) -> threading.Thread | None:
+        with self._lock:
+            if self._running:
+                return None
+            self._running = True
+            self._stop.clear()
         t = threading.Thread(target=self._run, daemon=True,
                              name="hello-broadcaster")
         t.start()
@@ -30,21 +37,24 @@ class HELLOBroadcaster:
         self._stop.set()
 
     def _run(self) -> None:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        while not self._stop.is_set():
-            if not self.plan.is_lost(time.time() - self.sim_start):
-                self._stop.set()
-                break
-            msg = proto.encode(proto.Message(
-                type="HELLO", sender=self.node_name,
-                ts=time.time() - self.sim_start,
-                payload=proto.HelloPayload(
-                    tcp_port=self.tcp_port,
-                    plan_version=self.plan.version,
-                ),
-            ))
-            sock.sendto(msg, ("255.255.255.255", self.udp_port))
-            jitter = random.uniform(-0.5, 0.5)
-            self._stop.wait(self.interval + jitter)
-        sock.close()
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            while not self._stop.is_set():
+                if not self.plan.is_lost(time.time() - self.sim_start):
+                    break
+                msg = proto.encode(proto.Message(
+                    type="HELLO", sender=self.node_name,
+                    ts=time.time() - self.sim_start,
+                    payload=proto.HelloPayload(
+                        tcp_port=self.tcp_port,
+                        plan_version=self.plan.version,
+                    ),
+                ))
+                sock.sendto(msg, ("255.255.255.255", self.udp_port))
+                jitter = random.uniform(-0.5, 0.5)
+                self._stop.wait(self.interval + jitter)
+            sock.close()
+        finally:
+            with self._lock:
+                self._running = False

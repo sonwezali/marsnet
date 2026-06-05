@@ -57,5 +57,5 @@ def test_sweep_keeps_live():
 
 def test_update_next_hop_missing_id():
     store = BundleStore()
-    result = store.update_next_hop("nonexistent", "relay:1")
-    assert result is False
+    store.update_next_hop("nonexistent", "relay:1")
+    assert store.get("nonexistent") is None

@@ -55,19 +55,18 @@ class TCPListener:
         sock_file = conn.makefile("rb", buffering=0)
         msg = proto.recv_message(sock_file)
         if not msg:
+            sock_file.close()
             conn.close()
             return
 
         if msg.type == "HANDSHAKE":
-            # Scheduled contact window opened by remote Contact Manager
             contact_id = msg.payload.get("contact_id", "unknown")
             self.on_contact_connection(conn, contact_id, msg.sender, msg)
-
         elif msg.type == "PLAN":
-            # Response to our HELLO broadcast
             received = ContactPlan.from_dict(msg.payload["plan"])
             self.on_plan_received(received)
+            sock_file.close()
             conn.close()
-
         else:
+            sock_file.close()
             conn.close()

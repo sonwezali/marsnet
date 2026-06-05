@@ -1,0 +1,112 @@
+import time
+import threading
+from unittest.mock import MagicMock
+
+from marsnet.node.contact_plan import ContactEntry, ContactPlan
+from marsnet.node.bundle_store import Bundle, BundleStore
+from marsnet.node.contact_manager import ContactManager, ContactState
+
+
+def make_entry(cid="base:1", from_node="rover_a", to_node="base",
+               phase=10.0, period=3600.0, duration=20.0, rate_bps=9600,
+               status="active"):
+    return ContactEntry(id=cid, created_by=from_node, from_node=from_node,
+                        to_node=to_node, phase=phase, period=period,
+                        duration=duration, rate_bps=rate_bps, status=status)
+
+
+def make_bundle(bundle_id="rover_a:img:0", src="rover_a", dst="base",
+                ttl=120.0, next_hop_contact=None):
+    return Bundle(
+        bundle_id=bundle_id, src=src, dst=dst, ttl=ttl,
+        created_at=time.time(), image_id="img",
+        fragment_offset=0, total_size=1024, data=b"data",
+        next_hop_contact=next_hop_contact,
+    )
+
+
+def make_manager(contacts=None, node_name="rover_a"):
+    if contacts is None:
+        contacts = [make_entry()]
+    plan = ContactPlan(version=1, sim_start=time.time(), contacts=contacts)
+    store = BundleStore()
+    on_plan_update = MagicMock()
+    on_bundle_received = MagicMock()
+    resolve_fn = MagicMock(return_value=("127.0.0.1", 9999))
+    mgr = ContactManager(
+        node_name=node_name, plan=plan, bundle_store=store,
+        destination="base", sim_start=plan.sim_start,
+        resolve_fn=resolve_fn,
+        on_plan_update=on_plan_update,
+        on_bundle_received=on_bundle_received,
+    )
+    return mgr, plan, store
+
+
+def test_report_failure_cancels_contact():
+    mgr, plan, _ = make_manager()
+    mgr.start()
+    assert plan.contact_by_id("base:1").status == "active"
+    mgr.report_failure("base:1")
+    assert plan.contact_by_id("base:1").status == "cancelled"
+
+
+def test_report_failure_idempotent():
+    mgr, plan, _ = make_manager()
+    mgr.start()
+    mgr.report_failure("base:1")
+    version_after_first = plan.version
+    mgr.report_failure("base:1")
+    assert plan.version == version_after_first
+
+
+def test_report_failure_calls_on_plan_update():
+    mgr, _, _ = make_manager()
+    mgr.start()
+    mgr.report_failure("base:1")
+    mgr.on_plan_update.assert_called_once()
+
+
+def test_report_failure_nonexistent_contact():
+    mgr, plan, _ = make_manager()
+    mgr.start()
+    version_before = plan.version
+    mgr.report_failure("nonexistent:1")
+    assert plan.version == version_before
+
+
+def test_inject_bundle_routes_via_cgr():
+    mgr, plan, store = make_manager()
+    mgr.start()
+    b = make_bundle()
+    mgr.inject_bundle(b)
+    assert b.next_hop_contact == "base:1"
+    assert store.get(b.bundle_id) is b
+
+
+def test_inject_bundle_no_route():
+    contacts = [make_entry(from_node="relay", to_node="base")]
+    mgr, _, store = make_manager(contacts=contacts)
+    mgr.start()
+    b = make_bundle(src="rover_a", dst="base")
+    mgr.inject_bundle(b)
+    assert b.next_hop_contact is None
+    assert store.get(b.bundle_id) is b
+
+
+def test_inject_bundle_stores_even_without_route():
+    contacts = []
+    mgr, _, store = make_manager(contacts=contacts)
+    mgr.start()
+    b = make_bundle()
+    mgr.inject_bundle(b)
+    assert store.get(b.bundle_id) is b
+
+
+def test_rebuild_on_plan_update():
+    mgr, plan, _ = make_manager()
+    mgr.start()
+    initial_timer_count = len(mgr._timers)
+    plan.add_contact(make_entry("rover_a:2", phase=50.0, period=3600.0))
+    mgr.rebuild_on_plan_update()
+    assert len(mgr._timers) > initial_timer_count

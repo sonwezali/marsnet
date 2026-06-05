@@ -58,7 +58,7 @@ class ConnectionHandler:
         self.reporter             = dashboard_reporter
         self.peer_handshake       = peer_handshake
 
-        self._sock_file           = sock.makefile("rb")
+        self._sock_file           = sock.makefile("rb", buffering=0)
         self._state               = State.HANDSHAKING
         self._last_heartbeat_sent = 0.0
         self._last_heartbeat_ack  = time.time()

@@ -25,8 +25,9 @@ class ContactManager:
         node_name: str,
         plan: ContactPlan,
         bundle_store: BundleStore,
-        destination: str,           # this node's primary delivery target (usually "base")
+        destination: str,
         sim_start: float,
+        resolve_fn: Callable[[str], tuple[str, int]],
         on_plan_update: Callable,
         on_bundle_received: Callable,
         dashboard_reporter=None,
@@ -36,28 +37,31 @@ class ContactManager:
         self.bundle_store = bundle_store
         self.destination = destination
         self.sim_start = sim_start
+        self.resolve_fn = resolve_fn
         self.on_plan_update = on_plan_update
         self.on_bundle_received = on_bundle_received
         self.reporter = dashboard_reporter
 
         self._states: dict[str, ContactState] = {}
         self._states_lock = threading.Lock()
+        self._manager_lock = threading.Lock()
         self._timers: list[threading.Timer] = []
-        self._outbound_queues: dict[str, queue.Queue] = {}  # contact_id → queue
+        self._outbound_queues: dict[str, queue.Queue] = {}
 
     def sim_time(self) -> float:
         return time.time() - self.sim_start
 
     def start(self) -> None:
-        self._rebuild_timers()
+        with self._manager_lock:
+            self._rebuild_timers()
 
     def rebuild_on_plan_update(self) -> None:
-        """Called when the contact plan changes. Cancel old timers, reschedule."""
-        for t in self._timers:
-            t.cancel()
-        self._timers.clear()
-        self._rebuild_timers()
-        self._reassign_all_bundles()
+        with self._manager_lock:
+            for t in self._timers:
+                t.cancel()
+            self._timers.clear()
+            self._rebuild_timers()
+            self._reassign_all_bundles()
 
     def _rebuild_timers(self) -> None:
         now = self.sim_time()
@@ -65,18 +69,16 @@ class ContactManager:
             if contact.status != "active":
                 continue
             if contact.from_node != self.node_name:
-                continue  # only schedule outbound contacts
+                continue
             for (ws, we) in contact.windows_in_horizon(from_time=now, horizon=3600.0):
-                delay_open  = max(0.0, ws - now)
+                delay_open = max(0.0, ws - now)
                 delay_close = max(0.0, we - now)
                 close_event = threading.Event()
                 t_open = threading.Timer(
                     delay_open, self._open_contact,
                     args=(contact, ws, we, close_event)
                 )
-                t_close = threading.Timer(
-                    delay_close, close_event.set
-                )
+                t_close = threading.Timer(delay_close, close_event.set)
                 t_open.daemon = True
                 t_close.daemon = True
                 self._timers += [t_open, t_close]
@@ -89,20 +91,17 @@ class ContactManager:
             self._states[contact.id] = ContactState.OPEN
 
         try:
-            # Resolve host for contact.to_node from config (injected at startup)
-            host, port = self._resolve(contact.to_node)
+            host, port = self.resolve_fn(contact.to_node)
             sock = socket.create_connection((host, port), timeout=5.0)
-        except OSError as e:
+        except OSError:
             self.report_failure(contact.id)
             return
 
         q = queue.Queue()
-        self._outbound_queues[contact.id] = q
-
-        # Enqueue any bundles already routed to this contact
-        bundles = self.bundle_store.get_by_contact(contact.id)
-        for bundle in bundles:
-            q.put(bundle)
+        with self._manager_lock:
+            self._outbound_queues[contact.id] = q
+            for bundle in self.bundle_store.get_by_contact(contact.id):
+                q.put(bundle)
 
         handler = ConnectionHandler(
             sock=sock, contact_id=contact.id, is_initiator=True,
@@ -123,18 +122,18 @@ class ContactManager:
         with self._states_lock:
             if self._states.get(contact.id) != ContactState.FAILED:
                 self._states[contact.id] = ContactState.CLOSED
-        self._outbound_queues.pop(contact.id, None)
+        with self._manager_lock:
+            self._outbound_queues.pop(contact.id, None)
 
     def report_failure(self, contact_id: str) -> None:
         with self._states_lock:
             if self._states.get(contact_id) in (ContactState.FAILED,
                                                  ContactState.CLOSED):
-                return  # idempotent
+                return
             self._states[contact_id] = ContactState.FAILED
 
         self.plan.cancel_contact(contact_id)
         self.on_plan_update(self.plan)
-        self._reassign_all_bundles()
 
         if self.reporter:
             self.reporter.post("contact_failed", {
@@ -142,7 +141,6 @@ class ContactManager:
             })
 
     def _reassign_all_bundles(self) -> None:
-        """Re-run CGR for every bundle whose next hop is now invalid."""
         snapshot = self.plan.snapshot()
         now = self.sim_time()
         for bundle in self.bundle_store.all():
@@ -150,16 +148,15 @@ class ContactManager:
                                self.sim_start)
             new_hop = result.next_hop_contact if result else None
             self.bundle_store.update_next_hop(bundle.bundle_id, new_hop)
-            # If new hop has an open queue, enqueue immediately
             if new_hop and new_hop in self._outbound_queues:
                 self._outbound_queues[new_hop].put(bundle)
 
     def accept_inbound(self, sock, contact_id: str, close_event: threading.Event,
                        end_time: float, peer_handshake=None) -> None:
-        """Called by TCPListener when an inbound scheduled connection arrives."""
         q = queue.Queue()
-        for bundle in self.bundle_store.get_by_contact(contact_id):
-            q.put(bundle)
+        with self._manager_lock:
+            for bundle in self.bundle_store.get_by_contact(contact_id):
+                q.put(bundle)
         handler = ConnectionHandler(
             sock=sock, contact_id=contact_id, is_initiator=False,
             close_event=close_event, end_time=end_time,
@@ -177,19 +174,15 @@ class ContactManager:
         t.start()
 
     def inject_bundle(self, bundle) -> None:
-        """Route and enqueue a new bundle (image fragment from this node)."""
-        snapshot = self.plan.snapshot()
-        result = cgr_route(snapshot, bundle.src, bundle.dst,
-                           self.sim_time(), self.sim_start)
-        if result:
-            bundle.next_hop_contact = result.next_hop_contact
+        with self._manager_lock:
+            snapshot = self.plan.snapshot()
+            result = cgr_route(snapshot, bundle.src, bundle.dst,
+                               self.sim_time(), self.sim_start)
+            if result:
+                bundle.next_hop_contact = result.next_hop_contact
+            else:
+                bundle.next_hop_contact = None
             self.bundle_store.insert(bundle)
-            if result.next_hop_contact in self._outbound_queues:
-                self._outbound_queues[result.next_hop_contact].put(bundle)
-        else:
-            bundle.next_hop_contact = None
-            self.bundle_store.insert(bundle)  # store, re-route when plan updates
-
-    # Override in subclass or inject at startup
-    def _resolve(self, node_name: str) -> tuple[str, int]:
-        raise NotImplementedError("inject _resolve via constructor or subclass")
+            if bundle.next_hop_contact and \
+               bundle.next_hop_contact in self._outbound_queues:
+                self._outbound_queues[bundle.next_hop_contact].put(bundle)

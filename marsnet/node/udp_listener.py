@@ -1,6 +1,7 @@
 from __future__ import annotations
 import socket
 import threading
+import time
 
 from marsnet.node import protocol as proto
 from marsnet.node.contact_plan import ContactPlan
@@ -63,5 +64,4 @@ class UDPListener:
             pass
 
     def sim_time(self) -> float:
-        import time
         return time.time() - self.sim_start

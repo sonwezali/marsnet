@@ -1,4 +1,3 @@
-import copy
 import threading
 import time
 from dataclasses import dataclass
@@ -10,13 +9,13 @@ class Bundle:
     bundle_id: str
     src: str
     dst: str
-    ttl: float                              # seconds from created_at before expiry
-    created_at: float                       # time.time() at creation
+    ttl: float
+    created_at: float
     image_id: str
-    fragment_offset: int                    # byte offset in original image
-    total_size: int                         # total original image size in bytes
-    data: bytes                             # encrypted fragment payload
-    next_hop_contact: Optional[str] = None  # contact_id CGR assigned
+    fragment_offset: int
+    total_size: int
+    data: bytes
+    next_hop_contact: Optional[str] = None
 
     @property
     def expires_at(self) -> float:
@@ -28,7 +27,7 @@ class Bundle:
 
 class BundleStore:
     def __init__(self):
-        self._store = {}  # bundle_id -> Bundle
+        self._store: dict[str, Bundle] = {}
         self._lock = threading.Lock()
 
     def insert(self, bundle: Bundle) -> None:
@@ -45,23 +44,23 @@ class BundleStore:
 
     def get_by_contact(self, contact_id: str) -> list[Bundle]:
         with self._lock:
-            return [copy.copy(b) for b in self._store.values() if b.next_hop_contact == contact_id]
+            return [b for b in self._store.values()
+                    if b.next_hop_contact == contact_id]
 
     def all(self) -> list[Bundle]:
         with self._lock:
-            return [copy.copy(b) for b in self._store.values()]
+            return list(self._store.values())
 
-    def update_next_hop(self, bundle_id: str, contact_id: str) -> bool:
+    def update_next_hop(self, bundle_id: str, contact_id: Optional[str]) -> None:
         with self._lock:
             if bundle_id in self._store:
                 self._store[bundle_id].next_hop_contact = contact_id
-                return True
-            return False
 
     def sweep_expired(self) -> list[str]:
         now = time.time()
         with self._lock:
-            dropped = [bid for bid, b in self._store.items() if b.expires_at < now]  # remove expired bundles
+            dropped = [bid for bid, b in self._store.items()
+                       if b.expires_at < now]
             for bid in dropped:
                 del self._store[bid]
         return dropped

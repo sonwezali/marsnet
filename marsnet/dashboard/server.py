@@ -1,18 +1,18 @@
 from __future__ import annotations
 import asyncio
-import json
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 app = FastAPI()
 
-# Connected WebSocket clients
 _clients: list[WebSocket] = []
 _clients_lock = asyncio.Lock()
+
+_STATIC_DIR = str(Path(__file__).parent / "static")
 
 
 class Event(BaseModel):
@@ -36,7 +36,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         _clients.append(ws)
     try:
         while True:
-            await ws.receive_text()  # keep alive, ignore client messages
+            await ws.receive_text()
     except WebSocketDisconnect:
         async with _clients_lock:
             _clients.remove(ws)
@@ -48,11 +48,10 @@ async def _broadcast(data: dict[str, Any]) -> None:
         for ws in _clients:
             try:
                 await ws.send_json(data)
-            except Exception:
+            except (RuntimeError, ConnectionError):
                 dead.append(ws)
         for ws in dead:
             _clients.remove(ws)
 
 
-app.mount("/", StaticFiles(directory="marsnet/dashboard/static",
-                           html=True), name="static")
+app.mount("/", StaticFiles(directory=_STATIC_DIR, html=True), name="static")

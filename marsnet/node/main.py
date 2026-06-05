@@ -39,9 +39,17 @@ def main():
     bundle_store = BundleStore()
 
     with open(args.peers) as f:
-        peers: dict[str, str] = json.load(f)  # {"rover_a": "192.168.1.11:7001"}
+        peers: dict[str, str] = json.load(f)
+
+    if plan.sim_start == 0.0:
+        plan.sim_start = time.time()
 
     sim_start = plan.sim_start
+
+    def resolve(node_name: str) -> tuple[str, int]:
+        addr = peers[node_name]
+        host, port = addr.rsplit(":", 1)
+        return host, int(port)
 
     reporter = DashboardReporter(cfg.dashboard_url, cfg.name)
     reporter.start()
@@ -55,7 +63,7 @@ def main():
 
     def on_bundle_received(bundle) -> None:
         if bundle.dst == cfg.name:
-            bundle_store.insert(bundle)  # Insert before assembling
+            bundle_store.insert(bundle)
             assembler.on_fragment(bundle.image_id)
             reporter.post("fragment_received", {
                 "image_id": bundle.image_id,
@@ -69,20 +77,13 @@ def main():
     contact_mgr = ContactManager(
         node_name=cfg.name, plan=plan, bundle_store=bundle_store,
         destination=args.destination, sim_start=sim_start,
+        resolve_fn=resolve,
         on_plan_update=on_plan_update,
         on_bundle_received=on_bundle_received,
         dashboard_reporter=reporter,
     )
 
-    # Inject peer address resolver
-    def resolve(node_name: str) -> tuple[str, int]:
-        addr = peers[node_name]
-        host, port = addr.rsplit(":", 1)
-        return host, int(port)
-    contact_mgr._resolve = resolve
-
     def on_contact_connection(sock, contact_id, peer_name, peer_handshake=None):
-        import threading
         close_event = threading.Event()
         contact = plan.contact_by_id(contact_id)
         end_time_sim = contact.next_window(after=time.time() - sim_start)[1] \
@@ -130,7 +131,7 @@ def main():
         })
 
     stop_event = threading.Event()
-    signal.signal(signal.SIGINT,  lambda *_: stop_event.set())
+    signal.signal(signal.SIGINT, lambda *_: stop_event.set())
     signal.signal(signal.SIGTERM, lambda *_: stop_event.set())
     stop_event.wait()
 

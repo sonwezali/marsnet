@@ -85,3 +85,54 @@ def test_plan_cancel_contact():
     plan.cancel_contact("base:1")
     assert plan.version == 2
     assert plan.contact_by_id("base:1").status == "cancelled"
+
+
+def test_cancel_contact_idempotent():
+    plan = ContactPlan(version=1, sim_start=0.0, contacts=[make_entry("base:1")])
+    plan.cancel_contact("base:1")
+    assert plan.version == 2
+    plan.cancel_contact("base:1")
+    assert plan.version == 2
+
+
+def test_cancel_contact_nonexistent():
+    plan = ContactPlan(version=1, sim_start=0.0, contacts=[])
+    plan.cancel_contact("nonexistent:1")
+    assert plan.version == 1
+
+
+def test_is_lost_no_contacts():
+    plan = ContactPlan(version=1, sim_start=0.0, contacts=[])
+    assert plan.is_lost(0.0) is True
+
+
+def test_is_lost_with_future_window():
+    e = make_entry(phase=10.0, period=60.0, duration=15.0)
+    plan = ContactPlan(version=1, sim_start=0.0, contacts=[e])
+    assert plan.is_lost(0.0) is False
+
+
+def test_is_lost_all_cancelled():
+    e = make_entry(phase=10.0, period=60.0, duration=15.0)
+    plan = ContactPlan(version=1, sim_start=0.0, contacts=[e])
+    plan.cancel_contact("base:1")
+    assert plan.is_lost(0.0) is True
+
+
+def test_plan_roundtrip():
+    e = make_entry("base:1")
+    plan = ContactPlan(version=3, sim_start=100.0, contacts=[e])
+    d = plan.to_dict()
+    restored = ContactPlan.from_dict(d)
+    assert restored.version == 3
+    assert restored.sim_start == 100.0
+    assert len(restored.contacts) == 1
+    assert restored.contact_by_id("base:1").from_node == "base"
+    assert restored.contact_by_id("base:1").status == "active"
+
+
+def test_plan_roundtrip_with_cancelled():
+    e = make_entry("base:1", status="cancelled")
+    plan = ContactPlan(version=2, sim_start=0.0, contacts=[e])
+    restored = ContactPlan.from_dict(plan.to_dict())
+    assert restored.contact_by_id("base:1").status == "cancelled"

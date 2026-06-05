@@ -98,8 +98,9 @@ class ContactPlan:
 
     def cancel_contact(self, contact_id: str) -> None:
         with self._lock:
-            if contact_id in self._contacts:
-                self._contacts[contact_id].status = "cancelled"
+            entry = self._contacts.get(contact_id)
+            if entry and entry.status == "active":
+                entry.status = "cancelled"
                 self.version += 1
 
     def merge(self, other: ContactPlan) -> bool:
