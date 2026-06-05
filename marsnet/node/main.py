@@ -41,9 +41,6 @@ def main():
     with open(args.peers) as f:
         peers: dict[str, str] = json.load(f)
 
-    if plan.sim_start == 0.0:
-        plan.sim_start = time.time()
-
     sim_start = plan.sim_start
 
     def resolve(node_name: str) -> tuple[str, int]:
