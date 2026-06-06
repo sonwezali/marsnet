@@ -11,6 +11,7 @@ from marsnet.node.contact_plan import ContactPlan
 from marsnet.node.bundle_store import BundleStore
 from marsnet.node.crypto import CryptoManager
 from marsnet.node.contact_manager import ContactManager
+from marsnet.node.sim_clock import SimClock
 from marsnet.node.tcp_listener import TCPListener
 from marsnet.node.udp_listener import UDPListener
 from marsnet.node.hello_broadcaster import HELLOBroadcaster
@@ -41,7 +42,7 @@ def main():
     with open(args.peers) as f:
         peers: dict[str, str] = json.load(f)
 
-    sim_start = plan.sim_start
+    sim_clock = SimClock(plan.sim_start)
 
     def resolve(node_name: str) -> tuple[str, int]:
         addr = peers[node_name]
@@ -51,17 +52,18 @@ def main():
     reporter = DashboardReporter(cfg.dashboard_url, cfg.name)
     reporter.start()
 
-    broadcaster = HELLOBroadcaster(cfg.udp_port, cfg.port, cfg.name, plan, sim_start)
+    broadcaster = HELLOBroadcaster(cfg.udp_port, cfg.port, cfg.name, plan, sim_clock.value)
     assembler = ImageAssembler(bundle_store, crypto,
                                output_dir=cfg.image_dir or ".")
 
     # contact_mgr is defined after the callbacks due to circular dependency;
     # Python's late-binding closures resolve the reference at call time.
     def on_plan_update(updated_plan: ContactPlan) -> None:
+        sim_clock.adopt(updated_plan.sim_start)
         contact_mgr.rebuild_on_plan_update()
         reporter.post("plan_updated", {"version": updated_plan.version,
-                                       "ts": time.time() - sim_start})
-        if updated_plan.is_lost(time.time() - sim_start):
+                                       "ts": sim_clock.sim_time()})
+        if updated_plan.is_lost(sim_clock.sim_time()):
             broadcaster.start()
 
     def on_bundle_received(bundle) -> None:
@@ -72,14 +74,14 @@ def main():
                 "image_id": bundle.image_id,
                 "fragment_offset": bundle.fragment_offset,
                 "total_size": bundle.total_size,
-                "ts": time.time() - sim_start,
+                "ts": sim_clock.sim_time(),
             })
         else:
             contact_mgr.inject_bundle(bundle)
 
     contact_mgr = ContactManager(
         node_name=cfg.name, plan=plan, bundle_store=bundle_store,
-        destination=args.destination, sim_start=sim_start,
+        destination=args.destination, clock=sim_clock,
         resolve_fn=resolve,
         on_plan_update=on_plan_update,
         on_bundle_received=on_bundle_received,
@@ -95,8 +97,8 @@ def main():
     def on_contact_connection(sock, contact_id, _peer_name, peer_handshake=None):
         close_event = threading.Event()
         contact = plan.contact_by_id(contact_id)
-        end_time_sim = contact.next_window(after=time.time() - sim_start)[1] \
-                       if contact else (time.time() - sim_start + 30)
+        end_time_sim = contact.next_window(after=sim_clock.sim_time())[1] \
+                       if contact else (sim_clock.sim_time() + 30)
         contact_mgr.accept_inbound(sock, contact_id, close_event, end_time_sim,
                                    peer_handshake=peer_handshake)
 
@@ -109,16 +111,16 @@ def main():
         node_name=cfg.name, plan=plan,
         on_contact_connection=on_contact_connection,
         on_plan_received=on_plan_received,
-        sim_start=sim_start,
+        sim_start=sim_clock.value,
     )
-    udp_listener = UDPListener(cfg.udp_port, cfg.name, plan, sim_start)
+    udp_listener = UDPListener(cfg.udp_port, cfg.name, plan, sim_clock.value)
 
     tcp_listener.start()
     udp_listener.start()
     ttl_reaper.start()
     contact_mgr.start()
 
-    if plan.is_lost(time.time() - sim_start):
+    if plan.is_lost(sim_clock.sim_time()):
         broadcaster.start()
 
     if args.send_image:
@@ -134,7 +136,7 @@ def main():
         reporter.post("image_queued", {
             "image_id": image_id,
             "fragments": len(bundles),
-            "ts": time.time() - sim_start,
+            "ts": sim_clock.sim_time(),
         })
 
     stop_event = threading.Event()

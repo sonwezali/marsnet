@@ -10,6 +10,7 @@ from marsnet.node.contact_plan import ContactEntry, ContactPlan
 from marsnet.node.bundle_store import BundleStore
 from marsnet.node.cgr import cgr_route
 from marsnet.node.connection_handler import ConnectionHandler
+from marsnet.node.sim_clock import SimClock
 from marsnet.node.volume_tracker import VolumeTracker
 
 
@@ -27,7 +28,7 @@ class ContactManager:
         plan: ContactPlan,
         bundle_store: BundleStore,
         destination: str,
-        sim_start: float,
+        clock: SimClock,
         resolve_fn: Callable[[str], tuple[str, int]],
         on_plan_update: Callable,
         on_bundle_received: Callable,
@@ -37,7 +38,7 @@ class ContactManager:
         self.plan = plan
         self.bundle_store = bundle_store
         self.destination = destination
-        self.sim_start = sim_start
+        self.clock = clock
         self.resolve_fn = resolve_fn
         self.on_plan_update = on_plan_update
         self.on_bundle_received = on_bundle_received
@@ -51,7 +52,7 @@ class ContactManager:
         self._volume = VolumeTracker()
 
     def sim_time(self) -> float:
-        return time.time() - self.sim_start
+        return self.clock.sim_time()
 
     def start(self) -> None:
         with self._manager_lock:
@@ -113,7 +114,7 @@ class ContactManager:
             on_failure=self.report_failure,
             on_plan_update=self.on_plan_update,
             on_bundle_received=self.on_bundle_received,
-            sim_start=self.sim_start,
+            clock=self.clock,
             dashboard_reporter=self.reporter,
             on_bundle_acked=self.on_bundle_acked,
         )
@@ -152,7 +153,7 @@ class ContactManager:
             old_hop = bundle.next_hop_contact
             self._volume.release(bundle.bundle_id)
             result = cgr_route(snapshot, bundle.src, bundle.dst, now,
-                               self.sim_start, volume_used=self._volume.used())
+                               self.clock.value, volume_used=self._volume.used())
             new_hop = result.next_hop_contact if result else None
             if result:
                 self._volume.allocate(bundle.bundle_id, new_hop,
@@ -181,7 +182,7 @@ class ContactManager:
             on_failure=self.report_failure,
             on_plan_update=self.on_plan_update,
             on_bundle_received=self.on_bundle_received,
-            sim_start=self.sim_start,
+            clock=self.clock,
             dashboard_reporter=self.reporter,
             peer_handshake=peer_handshake,
             on_bundle_acked=self.on_bundle_acked,
@@ -200,7 +201,7 @@ class ContactManager:
     def inject_bundle(self, bundle) -> None:
         snapshot = self.plan.snapshot()
         result = cgr_route(snapshot, bundle.src, bundle.dst,
-                           self.sim_time(), self.sim_start,
+                           self.sim_time(), self.clock.value,
                            volume_used=self._volume.used())
         bundle.next_hop_contact = result.next_hop_contact if result else None
         if result:
