@@ -48,3 +48,24 @@ def test_adopt_is_idempotent():
     clock.adopt(500.0)
     clock.adopt(600.0)
     assert clock.value == 500.0
+
+
+def test_adopt_is_thread_safe_first_adopter_wins():
+    import threading
+    clock = SimClock()
+    barrier = threading.Barrier(50)
+    values_to_try = [float(i) for i in range(1, 51)]
+    results: list[bool] = []
+
+    def worker(ts: float) -> None:
+        barrier.wait()
+        results.append(clock.adopt(ts))
+
+    threads = [threading.Thread(target=worker, args=(v,)) for v in values_to_try]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert sum(1 for r in results if r is True) == 1
+    assert clock.value in values_to_try
