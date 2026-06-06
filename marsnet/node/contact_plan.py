@@ -104,15 +104,12 @@ class ContactPlan:
                 self.version += 1
 
     def merge(self, other: ContactPlan) -> bool:
-        """
-        Merge other plan into self. Rules:
-        - Cancellations from either side always win (one-way: active→cancelled).
-        - New contacts from either side are added.
-        Returns True if anything changed.
-        """
         other_contacts = {c.id: c for c in other.contacts}
         changed = False
         with self._lock:
+            if self.sim_start == 0.0 and other.sim_start > 0.0:
+                self.sim_start = other.sim_start
+                changed = True
             for cid, entry in other_contacts.items():
                 if cid not in self._contacts:
                     self._contacts[cid] = entry

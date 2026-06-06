@@ -17,6 +17,7 @@ class Message:
 class HandshakePayload:
     contact_id: str
     plan_version: int
+    sim_start: float = 0.0
 
 @dataclass
 class RequestPlanPayload:

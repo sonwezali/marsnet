@@ -136,3 +136,27 @@ def test_plan_roundtrip_with_cancelled():
     plan = ContactPlan(version=2, sim_start=0.0, contacts=[e])
     restored = ContactPlan.from_dict(plan.to_dict())
     assert restored.contact_by_id("base:1").status == "cancelled"
+
+
+def test_merge_adopts_sim_start_when_self_is_zero():
+    plan_a = ContactPlan(version=1, sim_start=0.0, contacts=[])
+    plan_b = ContactPlan(version=1, sim_start=1000.0, contacts=[])
+    changed = plan_a.merge(plan_b)
+    assert changed is True
+    assert plan_a.sim_start == 1000.0
+
+
+def test_merge_does_not_override_existing_sim_start():
+    plan_a = ContactPlan(version=1, sim_start=500.0, contacts=[])
+    plan_b = ContactPlan(version=1, sim_start=1000.0, contacts=[])
+    plan_a.merge(plan_b)
+    assert plan_a.sim_start == 500.0
+
+
+def test_merge_returns_true_for_sim_start_only_change():
+    e = make_entry("base:1")
+    plan_a = ContactPlan(version=1, sim_start=0.0, contacts=[e])
+    plan_b = ContactPlan(version=1, sim_start=1000.0, contacts=[e])
+    changed = plan_a.merge(plan_b)
+    assert changed is True
+    assert plan_a.sim_start == 1000.0
