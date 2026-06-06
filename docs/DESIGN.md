@@ -162,8 +162,12 @@ Input:
   volume_used   — dict: (contact_id, window_start) → bytes already allocated
 
 Output:
-  CGRResult(next_hop_contact, earliest_arrival)
+  CGRResult(next_hop_contact, earliest_arrival, first_hop_window_start)
   or None if destination is unreachable
+
+  first_hop_window_start identifies which window instance the first hop departs
+  on, so the Contact Manager can charge the bundle's bytes against the correct
+  (contact_id, window_start) entry in volume_used.
 ```
 
 ### Algorithm
@@ -246,7 +250,7 @@ CGR is invoked:
 
 ### Volume tracking
 
-`volume_used` is a dict mapping `(contact_id, window_start_time) → bytes_allocated`. It is updated by the Contact Manager when a bundle is enqueued for a contact. When a bundle is ACK'd or dropped, its allocation is released.
+`volume_used` is a dict mapping `(contact_id, window_start_time) → bytes_allocated`, owned by the Contact Manager's `VolumeTracker` (`marsnet/node/volume_tracker.py`). The Contact Manager allocates a bundle's `len(data)` bytes against its first-hop window when the bundle is injected or reassigned, and passes `volume_used` into every `cgr_route` call so full windows are skipped. The allocation is released when the bundle is ACK'd (`on_bundle_acked`), dropped by the TTL reaper (`release_volume`), or rerouted (re-allocation replaces the prior entry).
 
 ---
 
