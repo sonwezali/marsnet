@@ -10,6 +10,7 @@ from typing import Callable, Optional
 from marsnet.node import protocol as proto
 from marsnet.node.bundle_store import Bundle, BundleStore
 from marsnet.node.contact_plan import ContactPlan
+from marsnet.node.sim_clock import SimClock
 
 HEARTBEAT_INTERVAL = 2.0
 HEARTBEAT_TIMEOUT  = 6.0
@@ -38,7 +39,7 @@ class ConnectionHandler:
         on_failure: Callable[[str], None],  # contact_manager.report_failure
         on_plan_update: Callable[[ContactPlan], None],
         on_bundle_received: Callable[[Bundle], None],
-        sim_start: float,
+        clock: SimClock,
         dashboard_reporter=None,
         peer_handshake: Optional[proto.Message] = None,
         on_bundle_acked: Optional[Callable[[str], None]] = None,
@@ -55,7 +56,7 @@ class ConnectionHandler:
         self.on_failure           = on_failure
         self.on_plan_update       = on_plan_update
         self.on_bundle_received   = on_bundle_received
-        self.sim_start            = sim_start
+        self.clock                = clock
         self.reporter             = dashboard_reporter
         self.peer_handshake       = peer_handshake
         self.on_bundle_acked      = on_bundle_acked
@@ -66,7 +67,7 @@ class ConnectionHandler:
         self._last_heartbeat_ack  = time.time()
 
     def sim_time(self) -> float:
-        return time.time() - self.sim_start
+        return self.clock.sim_time()
 
     def run(self) -> None:
         try:
@@ -84,6 +85,7 @@ class ConnectionHandler:
             payload=proto.HandshakePayload(
                 contact_id=self.contact_id,
                 plan_version=self.plan.version,
+                sim_start=self.clock.value,
             )
         ))
 
@@ -95,7 +97,13 @@ class ConnectionHandler:
             return
 
         peer_version = msg.payload["plan_version"]
-        if peer_version > self.plan.version:
+        peer_sim_start = msg.payload.get("sim_start", 0.0)
+
+        needs_plan = peer_version > self.plan.version
+        if not self.clock.is_set() and peer_sim_start > 0.0:
+            needs_plan = True
+
+        if needs_plan:
             self._request_plan()
         elif peer_version < self.plan.version:
             self._send_plan()

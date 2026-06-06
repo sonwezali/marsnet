@@ -1,0 +1,122 @@
+# tests/test_connection_handler.py
+from __future__ import annotations
+import queue
+import socket
+import threading
+from unittest.mock import MagicMock, patch
+
+import marsnet.node.protocol as proto
+from marsnet.node.bundle_store import BundleStore
+from marsnet.node.connection_handler import ConnectionHandler
+from marsnet.node.contact_plan import ContactPlan
+from marsnet.node.sim_clock import SimClock
+
+
+def make_handler(clock: SimClock, plan: ContactPlan,
+                 peer_handshake: proto.Message | None = None):
+    sock_a, sock_b = socket.socketpair()
+    handler = ConnectionHandler(
+        sock=sock_a,
+        contact_id="base:1",
+        is_initiator=True,
+        close_event=threading.Event(),
+        end_time=9999.0,
+        node_name="rover_a",
+        plan=plan,
+        bundle_store=BundleStore(),
+        outbound_queue=queue.Queue(),
+        on_failure=MagicMock(),
+        on_plan_update=MagicMock(),
+        on_bundle_received=MagicMock(),
+        clock=clock,
+        peer_handshake=peer_handshake,
+    )
+    return handler, sock_a, sock_b
+
+
+def make_peer_handshake(plan_version: int, sim_start: float) -> proto.Message:
+    return proto.Message(
+        type="HANDSHAKE", sender="base", ts=0.0,
+        payload={
+            "contact_id": "base:1",
+            "plan_version": plan_version,
+            "sim_start": sim_start,
+        },
+    )
+
+
+def test_handshake_requests_plan_when_clock_unset_and_peer_has_sim_start():
+    plan = ContactPlan(version=1, sim_start=0.0, contacts=[])
+    clock = SimClock()
+    peer_hs = make_peer_handshake(plan_version=1, sim_start=12345.0)
+    handler, sock_a, sock_b = make_handler(clock, plan, peer_handshake=peer_hs)
+
+    with patch.object(handler, "_request_plan") as mock_req, \
+         patch.object(handler, "_send_plan") as mock_send:
+        handler._handshake()
+
+    mock_req.assert_called_once()
+    mock_send.assert_not_called()
+    sock_a.close(); sock_b.close()
+
+
+def test_handshake_does_not_request_plan_when_clock_set_and_versions_equal():
+    plan = ContactPlan(version=1, sim_start=1000.0, contacts=[])
+    clock = SimClock(1000.0)
+    peer_hs = make_peer_handshake(plan_version=1, sim_start=1000.0)
+    handler, sock_a, sock_b = make_handler(clock, plan, peer_handshake=peer_hs)
+
+    with patch.object(handler, "_request_plan") as mock_req, \
+         patch.object(handler, "_send_plan") as mock_send:
+        handler._handshake()
+
+    mock_req.assert_not_called()
+    mock_send.assert_not_called()
+    sock_a.close(); sock_b.close()
+
+
+def test_handshake_requests_plan_when_peer_version_higher():
+    plan = ContactPlan(version=1, sim_start=1000.0, contacts=[])
+    clock = SimClock(1000.0)
+    peer_hs = make_peer_handshake(plan_version=2, sim_start=1000.0)
+    handler, sock_a, sock_b = make_handler(clock, plan, peer_handshake=peer_hs)
+
+    with patch.object(handler, "_request_plan") as mock_req, \
+         patch.object(handler, "_send_plan"):
+        handler._handshake()
+
+    mock_req.assert_called_once()
+    sock_a.close(); sock_b.close()
+
+
+def test_handshake_sends_plan_when_our_version_higher():
+    plan = ContactPlan(version=3, sim_start=1000.0, contacts=[])
+    clock = SimClock(1000.0)
+    peer_hs = make_peer_handshake(plan_version=1, sim_start=1000.0)
+    handler, sock_a, sock_b = make_handler(clock, plan, peer_handshake=peer_hs)
+
+    with patch.object(handler, "_request_plan") as mock_req, \
+         patch.object(handler, "_send_plan") as mock_send:
+        handler._handshake()
+
+    mock_send.assert_called_once()
+    mock_req.assert_not_called()
+    sock_a.close(); sock_b.close()
+
+
+def test_handshake_sends_sim_start_in_outgoing_message():
+    plan = ContactPlan(version=1, sim_start=0.0, contacts=[])
+    clock = SimClock(99999.0)
+    peer_hs = make_peer_handshake(plan_version=1, sim_start=0.0)
+    handler, sock_a, sock_b = make_handler(clock, plan, peer_handshake=peer_hs)
+
+    with patch.object(handler, "_request_plan"), \
+         patch.object(handler, "_send_plan"):
+        handler._handshake()
+
+    # Read what was sent on sock_b (the peer's side)
+    sock_b.settimeout(1.0)
+    data = sock_b.recv(4096)
+    msg = proto.decode(data)
+    assert msg.payload["sim_start"] == 99999.0
+    sock_a.close(); sock_b.close()
