@@ -9,8 +9,9 @@ PLANNING_HORIZON = 3600.0  # seconds to look ahead - 1 hour
 
 @dataclass
 class CGRResult:
-    next_hop_contact: str    
-    earliest_arrival: float  
+    next_hop_contact: str
+    earliest_arrival: float
+    first_hop_window_start: float
 
 
 def cgr_route(
@@ -43,7 +44,7 @@ def cgr_route(
     edges.sort(key=lambda e: (e[0], e[1]))
 
     earliest: dict[str, float] = {source: current_time}
-    prev: dict[str, tuple[ContactEntry, str]] = {}
+    prev: dict[str, tuple[ContactEntry, str, float]] = {}
 
     for (we, ws, contact, sender, receiver) in edges:
         if sender not in earliest:
@@ -59,7 +60,7 @@ def cgr_route(
 
         if arrival < earliest.get(receiver, math.inf):
             earliest[receiver] = arrival
-            prev[receiver] = (contact, sender)
+            prev[receiver] = (contact, sender, ws)
 
     if destination not in prev:
         return None
@@ -70,15 +71,16 @@ def cgr_route(
         if node in seen:
             raise RuntimeError(f"CGR walk-back cycle detected at {node!r}")
         seen.add(node)
-        contact, sender = prev[node]
+        contact, sender, _ws = prev[node]
         if sender == source:
             break
         node = sender
 
-    first_hop_contact, _ = prev[node]
+    first_hop_contact, _, first_hop_ws = prev[node]
     return CGRResult(
         next_hop_contact=first_hop_contact.id,
         earliest_arrival=earliest[destination],
+        first_hop_window_start=first_hop_ws,
     )
 
 

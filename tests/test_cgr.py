@@ -82,3 +82,31 @@ def test_non_critical_contact():
         entry("base:2", "rover_a", "base",  phase=50, period=120, duration=20),
     ]
     assert not is_critical_contact(contacts, "base:1", "rover_a", "base", 0.0, SIM_START)
+
+
+def test_first_hop_window_start_direct():
+    contacts = [entry("base:1", "rover_a", "base", phase=10, period=120, duration=20)]
+    result = cgr_route(contacts, source="rover_a", destination="base",
+                       current_time=0.0, sim_start=SIM_START)
+    assert result.first_hop_window_start == 10.0
+
+
+def test_first_hop_window_start_multi_hop():
+    contacts = [
+        entry("relay:1", "relay", "rover_b", phase=5,  period=120, duration=20),
+        entry("relay:2", "relay", "base",    phase=30, period=120, duration=20),
+    ]
+    result = cgr_route(contacts, source="rover_b", destination="base",
+                       current_time=0.0, sim_start=SIM_START)
+    assert result.next_hop_contact == "relay:1"
+    assert result.first_hop_window_start == 5.0
+
+
+def test_first_hop_window_start_skips_full_window():
+    contacts = [entry("base:1", "rover_a", "base", phase=10, period=120,
+                      duration=5, rate_bps=8)]  # capacity = 5 bytes
+    volume_used = {("base:1", 10.0): 5}  # window at 10 is full
+    result = cgr_route(contacts, source="rover_a", destination="base",
+                       current_time=0.0, sim_start=SIM_START,
+                       volume_used=volume_used)
+    assert result.first_hop_window_start == 130.0
