@@ -5,15 +5,16 @@ import time
 
 from marsnet.node import protocol as proto
 from marsnet.node.contact_plan import ContactPlan
+from marsnet.node.sim_clock import SimClock
 
 
 class UDPListener:
     def __init__(self, udp_port: int, node_name: str, plan: ContactPlan,
-                 sim_start: float):
+                 clock: SimClock):
         self.udp_port = udp_port
         self.node_name = node_name
         self.plan = plan
-        self.sim_start = sim_start
+        self.clock = clock
         self._stop = threading.Event()
 
     def start(self) -> threading.Thread:
@@ -67,4 +68,4 @@ class UDPListener:
             pass
 
     def sim_time(self) -> float:
-        return time.time() - self.sim_start
+        return self.clock.sim_time()

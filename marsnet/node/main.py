@@ -52,13 +52,14 @@ def main():
     reporter = DashboardReporter(cfg.dashboard_url, cfg.name)
     reporter.start()
 
-    broadcaster = HELLOBroadcaster(cfg.udp_port, cfg.port, cfg.name, plan, sim_clock.value)
+    broadcaster = HELLOBroadcaster(cfg.udp_port, cfg.port, cfg.name, plan, sim_clock)
     assembler = ImageAssembler(bundle_store, crypto,
                                output_dir=cfg.image_dir or ".")
 
     # contact_mgr is defined after the callbacks due to circular dependency;
     # Python's late-binding closures resolve the reference at call time.
     def on_plan_update(updated_plan: ContactPlan) -> None:
+        # adopt before rebuild so _rebuild_timers sees the updated epoch
         sim_clock.adopt(updated_plan.sim_start)
         contact_mgr.rebuild_on_plan_update()
         reporter.post("plan_updated", {"version": updated_plan.version,
@@ -111,9 +112,8 @@ def main():
         node_name=cfg.name, plan=plan,
         on_contact_connection=on_contact_connection,
         on_plan_received=on_plan_received,
-        sim_start=sim_clock.value,
     )
-    udp_listener = UDPListener(cfg.udp_port, cfg.name, plan, sim_clock.value)
+    udp_listener = UDPListener(cfg.udp_port, cfg.name, plan, sim_clock)
 
     tcp_listener.start()
     udp_listener.start()

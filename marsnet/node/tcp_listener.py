@@ -16,7 +16,6 @@ class TCPListener:
         plan: ContactPlan,
         on_contact_connection: Callable,   # (sock, contact_id, peer_name) → None
         on_plan_received: Callable,        # (plan: ContactPlan) → None
-        sim_start: float,
     ):
         self.host = host
         self.port = port
@@ -24,7 +23,6 @@ class TCPListener:
         self.plan = plan
         self.on_contact_connection = on_contact_connection
         self.on_plan_received = on_plan_received
-        self.sim_start = sim_start
         self._stop = threading.Event()
 
     def start(self) -> threading.Thread:

@@ -6,17 +6,18 @@ import time
 
 from marsnet.node import protocol as proto
 from marsnet.node.contact_plan import ContactPlan
+from marsnet.node.sim_clock import SimClock
 
 
 class HELLOBroadcaster:
     def __init__(self, udp_port: int, tcp_port: int, node_name: str,
-                 plan: ContactPlan, sim_start: float,
+                 plan: ContactPlan, clock: SimClock,
                  interval: float = 5.0):
         self.udp_port = udp_port
         self.tcp_port = tcp_port
         self.node_name = node_name
         self.plan = plan
-        self.sim_start = sim_start
+        self.clock = clock
         self.interval = interval
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -39,11 +40,11 @@ class HELLOBroadcaster:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         while not self._stop.is_set():
-            if not self.plan.is_lost(time.time() - self.sim_start):
+            if not self.plan.is_lost(self.clock.sim_time()):
                 break
             msg = proto.encode(proto.Message(
                 type="HELLO", sender=self.node_name,
-                ts=time.time() - self.sim_start,
+                ts=self.clock.sim_time(),
                 payload=proto.HelloPayload(
                     tcp_port=self.tcp_port,
                     plan_version=self.plan.version,
