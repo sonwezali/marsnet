@@ -450,6 +450,19 @@ Acceptor  → Initiator: HEARTBEAT_ACK {}
 - On timeout: `contact_manager.report_failure(contact_id)` is called
 - The Contact Manager transitions the contact state to `FAILED`, cancels it in the plan, and re-runs CGR for all queued bundles
 
+### sim_start Bootstrap
+
+`sim_start` is the shared Unix epoch from which all simulation timestamps are measured. All nodes must agree on it for contact windows to open at the right wall-clock times.
+
+**Bootstrap flow (no manual file copying required):**
+
+1. Run `scripts/set_sim_start.py plans/initial_plan.json` on one designated node (typically `base`) before starting it. This stamps `sim_start` into the plan and bumps no version — the plan file is version 1 on all machines.
+2. Start all nodes. Nodes without a stamped `sim_start` (i.e., `sim_start == 0` in their plan) start a `SimClock` that returns `0.0` for `sim_time()`, so their contact timers see all windows as infinitely far in the past and no contacts open.
+3. During the first TCP contact handshake, each node includes its current `sim_start` in the `HANDSHAKE` message. A node with `sim_start == 0` that receives a peer's `sim_start > 0` requests the peer's plan unconditionally — regardless of plan version.
+4. The received plan is merged via `ContactPlan.merge()`, which adopts `sim_start` when the receiver's own value is zero. `on_plan_update` then calls `sim_clock.adopt()`, which updates the shared `SimClock` object, and `rebuild_on_plan_update()` reschedules all contact timers with the correct epoch.
+
+After this first handshake, the bootstrapped node behaves identically to a node that started with a pre-stamped plan. Subsequent contacts propagate as normal via version-based plan sync.
+
 ### Binary data in BUNDLE messages
 
 The `data` field in `BUNDLE` payloads is **base64-encoded** in JSON. This handles the fact that encrypted image fragments are arbitrary binary data that cannot appear directly in JSON strings.
