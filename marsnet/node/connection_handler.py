@@ -126,6 +126,7 @@ class ConnectionHandler:
         if msg and msg.type == "PLAN":
             received = ContactPlan.from_dict(msg.payload["plan"])
             if self.plan.merge(received):
+                self.clock.adopt(self.plan.sim_start)
                 self.on_plan_update(self.plan)
 
     def _send_plan(self) -> None:
@@ -174,6 +175,7 @@ class ConnectionHandler:
         elif msg.type == "PLAN":
             received = ContactPlan.from_dict(msg.payload["plan"])
             if self.plan.merge(received):
+                self.clock.adopt(self.plan.sim_start)
                 self.on_plan_update(self.plan)
 
     def _receive_bundle(self, msg: proto.Message) -> None:

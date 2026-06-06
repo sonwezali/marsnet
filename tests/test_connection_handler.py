@@ -120,3 +120,43 @@ def test_handshake_sends_sim_start_in_outgoing_message():
     msg = proto.decode(data)
     assert msg.payload["sim_start"] == 99999.0
     sock_a.close(); sock_b.close()
+
+
+def test_bootstrap_sets_clock_after_receiving_plan():
+    """Full bootstrap: unset clock + peer has sim_start → clock becomes set after plan received."""
+    sim_start_val = 12345.0
+    plan_a = ContactPlan(version=1, sim_start=0.0, contacts=[])
+    plan_b = ContactPlan(version=1, sim_start=sim_start_val, contacts=[])
+    clock = SimClock()
+    peer_hs = make_peer_handshake(plan_version=1, sim_start=sim_start_val)
+    handler, sock_a, sock_b = make_handler(clock, plan_a, peer_handshake=peer_hs)
+
+    # Simulate the peer sending a PLAN_REQUEST response with plan_b
+    def fake_request_plan():
+        handler.plan.merge(plan_b)
+        handler.clock.adopt(handler.plan.sim_start)
+        handler.on_plan_update(handler.plan)
+
+    with patch.object(handler, "_request_plan", side_effect=fake_request_plan), \
+         patch.object(handler, "_send_plan"):
+        handler._handshake()
+
+    assert clock.is_set() is True
+    assert clock.value == sim_start_val
+    sock_a.close(); sock_b.close()
+
+
+def test_handshake_does_not_request_plan_when_both_clocks_unset():
+    """Neither side has sim_start yet — no spurious plan request."""
+    plan = ContactPlan(version=1, sim_start=0.0, contacts=[])
+    clock = SimClock()
+    peer_hs = make_peer_handshake(plan_version=1, sim_start=0.0)
+    handler, sock_a, sock_b = make_handler(clock, plan, peer_handshake=peer_hs)
+
+    with patch.object(handler, "_request_plan") as mock_req, \
+         patch.object(handler, "_send_plan") as mock_send:
+        handler._handshake()
+
+    mock_req.assert_not_called()
+    mock_send.assert_not_called()
+    sock_a.close(); sock_b.close()
