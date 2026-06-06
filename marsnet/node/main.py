@@ -54,9 +54,6 @@ def main():
     broadcaster = HELLOBroadcaster(cfg.udp_port, cfg.port, cfg.name, plan, sim_start)
     assembler = ImageAssembler(bundle_store, crypto,
                                output_dir=cfg.image_dir or ".")
-    ttl_reaper = TTLReaper(bundle_store,
-                           on_drop=lambda bid: reporter.post("bundle_dropped",
-                                                             {"bundle_id": bid}))
 
     # contact_mgr is defined after the callbacks due to circular dependency;
     # Python's late-binding closures resolve the reference at call time.
@@ -88,6 +85,12 @@ def main():
         on_bundle_received=on_bundle_received,
         dashboard_reporter=reporter,
     )
+
+    def on_bundle_dropped(bid: str) -> None:
+        contact_mgr.release_volume(bid)
+        reporter.post("bundle_dropped", {"bundle_id": bid})
+
+    ttl_reaper = TTLReaper(bundle_store, on_drop=on_bundle_dropped)
 
     def on_contact_connection(sock, contact_id, _peer_name, peer_handshake=None):
         close_event = threading.Event()

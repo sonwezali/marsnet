@@ -41,6 +41,7 @@ class ConnectionHandler:
         sim_start: float,
         dashboard_reporter=None,
         peer_handshake: Optional[proto.Message] = None,
+        on_bundle_acked: Optional[Callable[[str], None]] = None,
     ):
         self.sock                 = sock
         self.contact_id           = contact_id
@@ -57,6 +58,7 @@ class ConnectionHandler:
         self.sim_start            = sim_start
         self.reporter             = dashboard_reporter
         self.peer_handshake       = peer_handshake
+        self.on_bundle_acked      = on_bundle_acked
 
         self._sock_file           = sock.makefile("rb", buffering=0)
         self._state               = State.HANDSHAKING
@@ -150,7 +152,11 @@ class ConnectionHandler:
         if msg.type == "BUNDLE":
             self._receive_bundle(msg)
         elif msg.type == "BUNDLE_ACK":
-            self.bundle_store.delete(msg.payload["bundle_id"])
+            bid = msg.payload["bundle_id"]
+            if self.on_bundle_acked is not None:
+                self.on_bundle_acked(bid)
+            else:
+                self.bundle_store.delete(bid)
         elif msg.type == "HEARTBEAT":
             proto.send_message(self.sock, proto.Message(type="HEARTBEAT_ACK", sender=self.node_name, ts=self.sim_time(), payload=proto.HeartbeatAckPayload()))
         elif msg.type == "HEARTBEAT_ACK":

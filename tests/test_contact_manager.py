@@ -146,3 +146,60 @@ def test_reassign_updates_hop_on_contact_failure():
     mgr.report_failure("base:1")
     # No route available now
     assert b.next_hop_contact is None
+
+
+def make_sized_bundle(bundle_id, data: bytes):
+    return Bundle(
+        bundle_id=bundle_id, src="rover_a", dst="base", ttl=120.0,
+        created_at=time.time(), image_id="img",
+        fragment_offset=0, total_size=1024, data=data,
+        next_hop_contact=None,
+    )
+
+
+def test_inject_bundle_allocates_volume():
+    mgr, plan, store = make_manager()
+    mgr.start()
+    b = make_sized_bundle("rover_a:img:0", b"0123456789")  # 10 bytes
+    mgr.inject_bundle(b)
+    # base:1 opens at phase=10
+    assert mgr._volume.used()[("base:1", 10.0)] == 10
+
+
+def test_inject_bundle_skips_full_window():
+    # capacity = rate_bps * duration / 8 = 8 * 5 / 8 = 5 bytes
+    contacts = [make_entry("base:1", from_node="rover_a", to_node="base",
+                           phase=10.0, period=120.0, duration=5.0, rate_bps=8)]
+    mgr, plan, store = make_manager(contacts=contacts)
+    mgr.start()
+    b1 = make_sized_bundle("rover_a:img:0", b"12345")   # fills window at 10
+    b2 = make_sized_bundle("rover_a:img:5", b"67890")   # must spill to next window
+    mgr.inject_bundle(b1)
+    mgr.inject_bundle(b2)
+    used = mgr._volume.used()
+    assert used[("base:1", 10.0)] == 5
+    assert used[("base:1", 130.0)] == 5   # 10 + period(120)
+    assert b2.next_hop_contact == "base:1"
+
+
+def test_release_volume_frees_window():
+    contacts = [make_entry("base:1", from_node="rover_a", to_node="base",
+                           phase=10.0, period=120.0, duration=5.0, rate_bps=8)]
+    mgr, plan, store = make_manager(contacts=contacts)
+    mgr.start()
+    b1 = make_sized_bundle("rover_a:img:0", b"12345")
+    mgr.inject_bundle(b1)
+    assert mgr._volume.used()[("base:1", 10.0)] == 5
+    mgr.release_volume("rover_a:img:0")
+    assert ("base:1", 10.0) not in mgr._volume.used()
+
+
+def test_on_bundle_acked_releases_and_deletes():
+    mgr, plan, store = make_manager()
+    mgr.start()
+    b = make_sized_bundle("rover_a:img:0", b"0123456789")
+    mgr.inject_bundle(b)
+    assert store.get("rover_a:img:0") is b
+    mgr.on_bundle_acked("rover_a:img:0")
+    assert store.get("rover_a:img:0") is None
+    assert ("base:1", 10.0) not in mgr._volume.used()
