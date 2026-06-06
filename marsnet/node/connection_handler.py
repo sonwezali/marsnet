@@ -100,9 +100,12 @@ class ConnectionHandler:
 
         self._state = State.ACTIVE
         if self.reporter:
-            self.reporter.post("contact_open", {
-                "contact_id": self.contact_id, "ts": self.sim_time()
-            })
+            contact = self.plan.contact_by_id(self.contact_id)
+            evt = {"contact_id": self.contact_id, "ts": self.sim_time()}
+            if contact is not None:
+                evt["from"] = contact.from_node
+                evt["to"] = contact.to_node
+            self.reporter.post("contact_open", evt)
 
     def _request_plan(self) -> None:
         proto.send_message(self.sock, proto.Message(
