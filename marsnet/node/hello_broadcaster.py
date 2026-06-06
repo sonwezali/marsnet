@@ -40,7 +40,7 @@ class HELLOBroadcaster:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         while not self._stop.is_set():
-            if not self.plan.is_lost(self.clock.sim_time()):
+            if self.clock.is_set() and not self.plan.is_lost(self.clock.sim_time()):
                 break
             msg = proto.encode(proto.Message(
                 type="HELLO", sender=self.node_name,
