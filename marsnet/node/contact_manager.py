@@ -175,6 +175,7 @@ class ContactManager:
                        end_time: float, peer_handshake=None) -> None:
         q = queue.Queue()
         with self._manager_lock:
+            self._outbound_queues[contact_id] = q
             for bundle in self.bundle_store.get_by_contact(contact_id):
                 q.put(bundle)
         handler = ConnectionHandler(
@@ -190,7 +191,13 @@ class ContactManager:
             peer_handshake=peer_handshake,
             on_bundle_acked=self.on_bundle_acked,
         )
-        t = threading.Thread(target=handler.run, daemon=True,
+
+        def _run_and_cleanup():
+            handler.run()
+            with self._manager_lock:
+                self._outbound_queues.pop(contact_id, None)
+
+        t = threading.Thread(target=_run_and_cleanup, daemon=True,
                              name=f"conn-{contact_id}-in")
         t.start()
 
