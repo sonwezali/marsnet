@@ -36,7 +36,7 @@ def make_manager(contacts=None, node_name="rover_a"):
     resolve_fn = MagicMock(return_value=("127.0.0.1", 9999))
     mgr = ContactManager(
         node_name=node_name, plan=plan, bundle_store=store,
-        destination="base", clock=SimClock(plan.sim_start),
+        clock=SimClock(plan.sim_start),
         resolve_fn=resolve_fn,
         on_plan_update=on_plan_update,
         on_bundle_received=on_bundle_received,

@@ -27,7 +27,6 @@ class ContactManager:
         node_name: str,
         plan: ContactPlan,
         bundle_store: BundleStore,
-        destination: str,
         clock: SimClock,
         resolve_fn: Callable[[str], tuple[str, int]],
         on_plan_update: Callable,
@@ -37,7 +36,6 @@ class ContactManager:
         self.node_name = node_name
         self.plan = plan
         self.bundle_store = bundle_store
-        self.destination = destination
         self.clock = clock
         self.resolve_fn = resolve_fn
         self.on_plan_update = on_plan_update

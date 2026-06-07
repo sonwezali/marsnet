@@ -1,0 +1,5 @@
+{
+  "relay":   "<relay_IP>:12487",
+  "rover_a": "<rover_a_IP>:12487",
+  "rover_b": "<rover_b_IP>:12487"
+}

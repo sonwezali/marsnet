@@ -4,7 +4,6 @@ import json
 import os
 import signal
 import threading
-import time
 
 from marsnet.node.config import NodeConfig
 from marsnet.node.contact_plan import ContactPlan
@@ -20,15 +19,55 @@ from marsnet.node.image_assembler import fragment_image, ImageAssembler
 from marsnet.node.dashboard_reporter import DashboardReporter
 
 
+class NodeCLI:
+    def __init__(self, cfg: NodeConfig, store: BundleStore,
+                 inject_fn, crypto: CryptoManager, ttl: float):
+        self._cfg = cfg
+        self._store = store
+        self._inject = inject_fn
+        self._crypto = crypto
+        self._ttl = ttl
+        self._tracked: dict[str, int] = {}  # image_id → total_fragments
+
+    def send(self, path: str) -> None:
+        stem = os.path.splitext(os.path.basename(path))[0]
+        image_id = stem
+        counter = 2
+        while image_id in self._tracked:
+            image_id = f"{stem}_{counter}"
+            counter += 1
+
+        bundles = fragment_image(
+            image_path=path, src=self._cfg.name,
+            dst="relay", ttl=self._ttl,
+            image_id=image_id, crypto=self._crypto,
+        )
+        for b in bundles:
+            self._inject(b)
+        self._tracked[image_id] = len(bundles)
+        print(f"Queued {len(bundles)} fragments  [{image_id}] → relay")
+
+    def status(self) -> None:
+        if not self._tracked:
+            print("  No images queued yet.")
+            return
+        for image_id, total in self._tracked.items():
+            remaining = sum(
+                1 for b in self._store.all() if b.image_id == image_id
+            )
+            sent = total - remaining
+            pct = int(sent / total * 100) if total > 0 else 100
+            filled = int(pct / 5)
+            bar = "█" * filled + "░" * (20 - filled)
+            print(f"  {image_id:<24} [{bar}] {sent}/{total}  ({pct}%)")
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="MarsNet node")
     p.add_argument("--config", required=True, help="Path to node config JSON")
     p.add_argument("--peers", required=True,
                    help="Path to peers JSON: {name: host:port}")
-    p.add_argument("--send-image", help="Path to image to transmit at startup")
-    p.add_argument("--destination", default="base")
     p.add_argument("--ttl", type=float, default=300.0)
-    p.add_argument("--image-id", default=None)
     return p.parse_args()
 
 
@@ -56,10 +95,7 @@ def main():
     assembler = ImageAssembler(bundle_store, crypto,
                                output_dir=cfg.image_dir or ".")
 
-    # contact_mgr is defined after the callbacks due to circular dependency;
-    # Python's late-binding closures resolve the reference at call time.
     def on_plan_update(updated_plan: ContactPlan) -> None:
-        # adopt before rebuild so _rebuild_timers sees the updated epoch
         sim_clock.adopt(updated_plan.sim_start)
         contact_mgr.rebuild_on_plan_update()
         reporter.post("plan_updated", {"version": updated_plan.version,
@@ -82,7 +118,7 @@ def main():
 
     contact_mgr = ContactManager(
         node_name=cfg.name, plan=plan, bundle_store=bundle_store,
-        destination=args.destination, clock=sim_clock,
+        clock=sim_clock,
         resolve_fn=resolve,
         on_plan_update=on_plan_update,
         on_bundle_received=on_bundle_received,
@@ -123,25 +159,43 @@ def main():
     if plan.is_lost(sim_clock.sim_time()):
         broadcaster.start()
 
-    if args.send_image:
-        image_id = args.image_id or os.path.splitext(
-            os.path.basename(args.send_image))[0]
-        bundles = fragment_image(
-            image_path=args.send_image, src=cfg.name,
-            dst=args.destination, ttl=args.ttl,
-            image_id=image_id, crypto=crypto,
-        )
-        for b in bundles:
-            contact_mgr.inject_bundle(b)
-        reporter.post("image_queued", {
-            "image_id": image_id,
-            "fragments": len(bundles),
-            "ts": sim_clock.sim_time(),
-        })
-
     stop_event = threading.Event()
-    signal.signal(signal.SIGINT, lambda *_: stop_event.set())
+    signal.signal(signal.SIGINT,  lambda *_: stop_event.set())
     signal.signal(signal.SIGTERM, lambda *_: stop_event.set())
+
+    cli = NodeCLI(
+        cfg=cfg,
+        store=bundle_store,
+        inject_fn=contact_mgr.inject_bundle,
+        crypto=crypto,
+        ttl=args.ttl,
+    )
+
+    print(f"[{cfg.name}] Node ready. Type an image path to send, 'status' to check progress, 'q' to quit.")
+
+    def _cli_loop() -> None:
+        while not stop_event.is_set():
+            try:
+                line = input("> ").strip()
+            except EOFError:
+                # stdin closed (e.g. piped input exhausted or /dev/null);
+                # keep the process running — only SIGINT/SIGTERM should stop it
+                break
+            if line in ("q", "quit"):
+                stop_event.set()
+                break
+            elif line == "status":
+                cli.status()
+            elif line == "":
+                print('  Type an image path, "status", or "q".')
+            else:
+                try:
+                    cli.send(line)
+                except FileNotFoundError:
+                    print(f"  File not found: {line}")
+
+    cli_thread = threading.Thread(target=_cli_loop, daemon=True)
+    cli_thread.start()
     stop_event.wait()
 
     tcp_listener.stop()

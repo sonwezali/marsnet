@@ -19,20 +19,23 @@ def write_config(tmp, name, port):
 
 
 def write_plan(tmp, sim_start):
+    # NodeCLI hardcodes dst="relay", so the receiving node must be named "relay".
+    # phase=4 gives enough headroom for both processes to start and the CLI
+    # to inject bundles before the first contact window opens.
     plan = {
         "version": 1, "sim_start": sim_start,
         "contacts": [{
             "id": "rover_a:1", "created_by": "rover_a",
-            "from": "rover_a", "to": "base",
-            "phase": 2, "period": 3600, "duration": 30,
+            "from": "rover_a", "to": "relay",
+            "phase": 4, "period": 3600, "duration": 30,
             "rate_bps": 9600, "status": "active"
         }]
     }
     (tmp / "plan.json").write_text(json.dumps(plan))
 
 
-def write_peers(tmp, base_port, rover_port):
-    peers = {"base": f"127.0.0.1:{base_port}",
+def write_peers(tmp, relay_port, rover_port):
+    peers = {"relay": f"127.0.0.1:{relay_port}",
              "rover_a": f"127.0.0.1:{rover_port}"}
     (tmp / "peers.json").write_text(json.dumps(peers))
     return str(tmp / "peers.json")
@@ -53,41 +56,57 @@ def test_image_delivered_end_to_end():
         sim_start = time.time()
         write_plan(tmp, sim_start)
 
-        base_port  = 17001
+        relay_port = 17001
         rover_port = 17002
-        base_cfg   = write_config(tmp, "base",    base_port)
+        relay_cfg  = write_config(tmp, "relay",   relay_port)
         rover_cfg  = write_config(tmp, "rover_a", rover_port)
-        peers_file = write_peers(tmp, base_port, rover_port)
+        peers_file = write_peers(tmp, relay_port, rover_port)
         img_path   = make_test_image(tmp)
 
         # Generate key
         from marsnet.node.crypto import CryptoManager
         CryptoManager.generate().save(str(tmp / "shared.key"))
 
-        base_proc = subprocess.Popen([
-            PYTHON, "-m", "marsnet.node.main",
-            "--config", base_cfg, "--peers", peers_file,
-        ])
+        relay_proc = subprocess.Popen(
+            [
+                PYTHON, "-m", "marsnet.node.main",
+                "--config", relay_cfg, "--peers", peers_file,
+            ],
+            stdin=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
         time.sleep(0.5)
-        rover_proc = subprocess.Popen([
-            PYTHON, "-m", "marsnet.node.main",
-            "--config", rover_cfg, "--peers", peers_file,
-            "--send-image", img_path, "--destination", "base",
-            "--ttl", "60", "--image-id", "testimg",
-        ])
+        rover_proc = subprocess.Popen(
+            [
+                PYTHON, "-m", "marsnet.node.main",
+                "--config", rover_cfg, "--peers", peers_file,
+                "--ttl", "60",
+            ],
+            stdin=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        # Feed the image path via the interactive CLI; do NOT send "q" so the
+        # rover stays alive long enough for the contact window (phase=2s) to open
+        # and the bundles to be transmitted.
+        rover_proc.stdin.write(f"{img_path}\n".encode())
+        rover_proc.stdin.flush()
 
-        # Wait up to 10s for image to arrive (contact window opens at phase=2)
-        deadline = time.time() + 10
-        received = tmp / "received" / "testimg.jpg"
+        # Wait up to 15s for image to arrive (contact window opens at phase=4)
+        deadline = time.time() + 15
+        received = tmp / "received" / "test.jpg"
         while time.time() < deadline:
             if received.exists():
                 break
             time.sleep(0.5)
 
-        base_proc.terminate()
+        relay_proc.terminate()
         rover_proc.terminate()
-        base_proc.wait()
-        rover_proc.wait()
+        relay_stderr = relay_proc.communicate()[1].decode(errors="replace")
+        rover_stderr = rover_proc.communicate()[1].decode(errors="replace")
 
-        assert received.exists(), "Image not received at base within 10s"
+        assert received.exists(), (
+            f"Image not received at relay within 15s\n"
+            f"relay stderr: {relay_stderr[-2000:]}\n"
+            f"rover stderr: {rover_stderr[-2000:]}"
+        )
         assert received.stat().st_size > 0
