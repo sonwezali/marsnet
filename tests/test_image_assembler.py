@@ -68,3 +68,23 @@ def test_non_adjacent_fragments_not_prematurely_complete():
         assembler = ImageAssembler(store, crypto, out_dir, chunk_size=CHUNK)
         result = assembler.on_fragment("img003")
         assert result is None
+
+
+def test_init_creates_missing_output_dir():
+    crypto = CryptoManager.generate()
+    store = BundleStore()
+    with tempfile.TemporaryDirectory() as base_dir:
+        out_dir = os.path.join(base_dir, "received_images")
+        assert not os.path.isdir(out_dir)
+        ImageAssembler(store, crypto, out_dir, chunk_size=CHUNK)
+        assert os.path.isdir(out_dir)
+
+
+def test_init_tolerates_already_existing_output_dir():
+    crypto = CryptoManager.generate()
+    store = BundleStore()
+    with tempfile.TemporaryDirectory() as out_dir:
+        assert os.path.isdir(out_dir)
+        # must not raise even though the directory already exists
+        ImageAssembler(store, crypto, out_dir, chunk_size=CHUNK)
+        assert os.path.isdir(out_dir)

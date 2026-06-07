@@ -49,6 +49,7 @@ class ImageAssembler:
         self.output_dir = output_dir
         self.chunk_size = chunk_size
         self._lock = threading.Lock()
+        os.makedirs(self.output_dir, exist_ok=True)
 
     def on_fragment(self, image_id: str) -> Optional[str]:
         with self._lock:
