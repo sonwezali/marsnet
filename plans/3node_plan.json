@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "sim_start": 0.0,
+  "sim_start": 1780833467.401202,
   "contacts": [
     {
       "id": "relay:1",
@@ -8,9 +8,9 @@
       "from": "relay",
       "to": "rover_a",
       "phase": 0,
-      "period": 120,
-      "duration": 20,
-      "rate_bps": 9600,
+      "period": 30,
+      "duration": 10,
+      "rate_bps": 64000,
       "status": "active"
     },
     {
@@ -18,10 +18,10 @@
       "created_by": "relay",
       "from": "relay",
       "to": "rover_b",
-      "phase": 40,
-      "period": 120,
-      "duration": 20,
-      "rate_bps": 9600,
+      "phase": 10,
+      "period": 30,
+      "duration": 10,
+      "rate_bps": 64000,
       "status": "active"
     },
     {
@@ -29,10 +29,10 @@
       "created_by": "rover_a",
       "from": "rover_a",
       "to": "rover_b",
-      "phase": 80,
-      "period": 120,
-      "duration": 20,
-      "rate_bps": 9600,
+      "phase": 20,
+      "period": 30,
+      "duration": 10,
+      "rate_bps": 64000,
       "status": "active"
     }
   ]

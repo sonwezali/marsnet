@@ -127,7 +127,7 @@ def main():
 
     def on_bundle_dropped(bid: str) -> None:
         contact_mgr.release_volume(bid)
-        reporter.post("bundle_dropped", {"bundle_id": bid})
+        reporter.post("bundle_dropped", {"bundle_id": bid, "ts": sim_clock.sim_time()})
 
     ttl_reaper = TTLReaper(bundle_store, on_drop=on_bundle_dropped)
 
