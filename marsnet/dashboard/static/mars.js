@@ -1,10 +1,7 @@
 // ── Node layout (fixed positions on 900×600 canvas) ──────────────────
 const NODES = {
-  base:    { x: 450, y: 480, label: "BASE",    color: "#c87941" },
-  rover_a: { x: 200, y: 350, label: "ROVER A", color: "#5080e0" },
-  rover_b: { x: 350, y: 280, label: "ROVER B", color: "#5080e0" },
-  rover_c: { x: 600, y: 300, label: "ROVER C", color: "#5080e0" },
-  rover_d: { x: 700, y: 420, label: "ROVER D", color: "#5080e0" },
+  rover_a: { x: 300, y: 450, label: "ROVER A", color: "#5080e0" },
+  rover_b: { x: 600, y: 450, label: "ROVER B", color: "#5080e0" },
   relay:   { x: 450, y: 80,  label: "RELAY",   color: "#e0c050", isOrbiter: true },
 };
 

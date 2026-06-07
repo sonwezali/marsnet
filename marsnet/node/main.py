@@ -67,7 +67,7 @@ def parse_args():
     p.add_argument("--config", required=True, help="Path to node config JSON")
     p.add_argument("--peers", required=True,
                    help="Path to peers JSON: {name: host:port}")
-    p.add_argument("--ttl", type=float, default=300.0)
+    p.add_argument("--ttl", type=float, default=600.0)
     return p.parse_args()
 
 
