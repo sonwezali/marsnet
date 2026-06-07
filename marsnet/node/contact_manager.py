@@ -154,7 +154,7 @@ class ContactManager:
         for bundle in self.bundle_store.all():
             old_hop = bundle.next_hop_contact
             self._volume.release(bundle.bundle_id)
-            result = cgr_route(snapshot, bundle.src, bundle.dst, now,
+            result = cgr_route(snapshot, self.node_name, bundle.dst, now,
                                self.clock.value, volume_used=self._volume.used(),
                                exclude_node=bundle.prev_hop)
             new_hop = result.next_hop_contact if result else None
@@ -203,7 +203,7 @@ class ContactManager:
 
     def inject_bundle(self, bundle) -> None:
         snapshot = self.plan.snapshot()
-        result = cgr_route(snapshot, bundle.src, bundle.dst,
+        result = cgr_route(snapshot, self.node_name, bundle.dst,
                            self.sim_time(), self.clock.value,
                            volume_used=self._volume.used(),
                            exclude_node=bundle.prev_hop)
