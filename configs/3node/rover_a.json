@@ -5,6 +5,6 @@
   "udp_port": 12487,
   "plan_path": "plans/3node_plan.json",
   "key_path": "shared.key",
-  "dashboard_url": "http://192.168.1.107:8000",
+  "dashboard_url": "http://192.168.1.108:8000",
   "image_dir": "received_images"
 }
