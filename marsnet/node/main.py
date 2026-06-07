@@ -1,5 +1,6 @@
 from __future__ import annotations
 import argparse
+import base64
 import json
 import os
 import signal
@@ -107,12 +108,17 @@ def main():
         if bundle.dst == cfg.name:
             bundle_store.insert(bundle)
             assembler.on_fragment(bundle.image_id)
-            reporter.post("fragment_received", {
+            evt = {
                 "image_id": bundle.image_id,
                 "fragment_offset": bundle.fragment_offset,
                 "total_size": bundle.total_size,
                 "ts": sim_clock.sim_time(),
-            })
+            }
+            try:
+                evt["data"] = base64.b64encode(crypto.decrypt(bundle.data)).decode()
+            except Exception:
+                pass  # undecryptable fragment: still report progress, no pixels
+            reporter.post("fragment_received", evt)
         else:
             contact_mgr.inject_bundle(bundle)
 

@@ -52,26 +52,59 @@ function handleEvent(ev) {
   }
 }
 
+const CHUNK = 512;
+
+function base64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
 function trackFragment(ev) {
   const id = ev.image_id;
-  if (!imageFragments[id]) imageFragments[id] = { received: new Set(), total: ev.total_size };
-  imageFragments[id].received.add(ev.fragment_offset);
+  let f = imageFragments[id];
+  if (!f) {
+    f = imageFragments[id] = {
+      received: new Set(), total: ev.total_size,
+      buf: new Uint8Array(ev.total_size),
+    };
+  }
+  if (ev.data && !f.received.has(ev.fragment_offset)) {
+    f.buf.set(base64ToBytes(ev.data), ev.fragment_offset);
+  }
+  f.received.add(ev.fragment_offset);
   updateImagePreview(id);
 }
 
 function updateImagePreview(id) {
   const f = imageFragments[id];
-  const pct = f.received.size / Math.ceil(f.total / 512);
+  const totalFrags = Math.ceil(f.total / CHUNK);
+  const pct = f.received.size / totalFrags;
   document.getElementById("img-progress").textContent =
-    `${id} — ${Math.round(pct * 100)}% received`;
-  // Paint received bands green, missing grey
-  imgCtx.clearRect(0, 0, 256, 256);
-  const bands = Math.ceil(f.total / 512);
-  const bh = 256 / bands;
-  for (let i = 0; i < bands; i++) {
-    imgCtx.fillStyle = f.received.has(i * 512) ? "#50c878" : "#2a2a35";
-    imgCtx.fillRect(0, i * bh, 256, bh);
-  }
+    `${id} — ${Math.round(pct * 100)}% (${f.received.size}/${totalFrags} fragments)`;
+
+  // Render the longest contiguous prefix from the start as a JPEG.
+  // A baseline JPEG decodes the rows it has so far, revealing top-to-bottom.
+  let prefixFrags = 0;
+  while (prefixFrags < totalFrags && f.received.has(prefixFrags * CHUNK)) prefixFrags++;
+  const complete = f.received.size === totalFrags;
+  const prefixLen = complete ? f.total : prefixFrags * CHUNK;
+  if (prefixLen <= 0) return;
+
+  const blob = new Blob([f.buf.subarray(0, prefixLen)], { type: "image/jpeg" });
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  img.onload = () => {
+    const scale = Math.min(256 / img.width, 256 / img.height);
+    const w = img.width * scale, h = img.height * scale;
+    imgCtx.fillStyle = "#1a1a22";
+    imgCtx.fillRect(0, 0, 256, 256);
+    imgCtx.drawImage(img, (256 - w) / 2, (256 - h) / 2, w, h);
+    URL.revokeObjectURL(url);
+  };
+  img.onerror = () => URL.revokeObjectURL(url);  // truncated prefix: keep last frame
+  img.src = url;
 }
 
 function logEvent(ev) {
