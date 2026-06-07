@@ -94,8 +94,10 @@ class ContactManager:
         try:
             host, port = self.resolve_fn(contact.to_node)
             sock = socket.create_connection((host, port), timeout=5.0)
-        except OSError:
-            self.report_failure(contact.id)
+        except OSError as e:
+            print(f"[{self.node_name}] connect fail {contact.id}: {e}")
+            with self._states_lock:
+                self._states[contact.id] = ContactState.CLOSED
             return
 
         q = queue.Queue()
@@ -116,16 +118,18 @@ class ContactManager:
             dashboard_reporter=self.reporter,
             on_bundle_acked=self.on_bundle_acked,
         )
-        t = threading.Thread(target=handler.run, daemon=True,
+
+        def _run_and_cleanup():
+            handler.run()
+            with self._states_lock:
+                if self._states.get(contact.id) != ContactState.FAILED:
+                    self._states[contact.id] = ContactState.CLOSED
+            with self._manager_lock:
+                self._outbound_queues.pop(contact.id, None)
+
+        t = threading.Thread(target=_run_and_cleanup, daemon=True,
                              name=f"conn-{contact.id}")
         t.start()
-        t.join()
-
-        with self._states_lock:
-            if self._states.get(contact.id) != ContactState.FAILED:
-                self._states[contact.id] = ContactState.CLOSED
-        with self._manager_lock:
-            self._outbound_queues.pop(contact.id, None)
 
     def report_failure(self, contact_id: str) -> None:
         with self._states_lock:

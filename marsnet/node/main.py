@@ -31,10 +31,10 @@ class NodeCLI:
 
     def send(self, path: str) -> None:
         stem = os.path.splitext(os.path.basename(path))[0]
-        image_id = stem
+        image_id = f"{self._cfg.name}-{stem}"
         counter = 2
         while image_id in self._tracked:
-            image_id = f"{stem}_{counter}"
+            image_id = f"{self._cfg.name}-{stem}_{counter}"
             counter += 1
 
         bundles = fragment_image(
