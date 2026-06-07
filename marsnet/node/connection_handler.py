@@ -187,6 +187,10 @@ class ConnectionHandler:
             total_size=p["total_size"],
             data=base64.b64decode(p["data"]),
         )
+        contact = self.plan.contact_by_id(self.contact_id)
+        if contact is not None:
+            bundle.prev_hop = (contact.from_node if contact.to_node == self.node_name
+                               else contact.to_node)
         self.on_bundle_received(bundle)
         proto.send_message(self.sock, proto.Message(
             type="BUNDLE_ACK", sender=self.node_name, ts=self.sim_time(),

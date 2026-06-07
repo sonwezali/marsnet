@@ -16,6 +16,7 @@ class Bundle:
     total_size: int
     data: bytes
     next_hop_contact: Optional[str] = None
+    prev_hop: Optional[str] = None
 
     @property
     def expires_at(self) -> float:

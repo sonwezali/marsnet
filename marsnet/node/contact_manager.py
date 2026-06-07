@@ -151,7 +151,8 @@ class ContactManager:
             old_hop = bundle.next_hop_contact
             self._volume.release(bundle.bundle_id)
             result = cgr_route(snapshot, bundle.src, bundle.dst, now,
-                               self.clock.value, volume_used=self._volume.used())
+                               self.clock.value, volume_used=self._volume.used(),
+                               exclude_node=bundle.prev_hop)
             new_hop = result.next_hop_contact if result else None
             if result:
                 self._volume.allocate(bundle.bundle_id, new_hop,
@@ -200,7 +201,8 @@ class ContactManager:
         snapshot = self.plan.snapshot()
         result = cgr_route(snapshot, bundle.src, bundle.dst,
                            self.sim_time(), self.clock.value,
-                           volume_used=self._volume.used())
+                           volume_used=self._volume.used(),
+                           exclude_node=bundle.prev_hop)
         bundle.next_hop_contact = result.next_hop_contact if result else None
         if result:
             self._volume.allocate(bundle.bundle_id, result.next_hop_contact,

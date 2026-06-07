@@ -21,6 +21,7 @@ def cgr_route(
     current_time: float,
     sim_start: float,
     volume_used: Optional[dict[tuple[str, float], int]] = None,
+    exclude_node: Optional[str] = None,
 ) -> Optional[CGRResult]:
     # volume_used: maps (contact_id, window_start) -> bytes already allocated.
     if volume_used is None:
@@ -37,9 +38,12 @@ def cgr_route(
             remaining = c.capacity_bytes - used
             if remaining <= 0:
                 continue
-            # both directions
-            edges.append((we, ws, c, c.from_node, c.to_node))
-            edges.append((we, ws, c, c.to_node, c.from_node))
+            # both directions, except split-horizon: the first hop out of
+            # `source` may never go straight back to `exclude_node`.
+            if not (source == c.from_node and exclude_node == c.to_node):
+                edges.append((we, ws, c, c.from_node, c.to_node))
+            if not (source == c.to_node and exclude_node == c.from_node):
+                edges.append((we, ws, c, c.to_node, c.from_node))
 
     edges.sort(key=lambda e: (e[0], e[1]))
 

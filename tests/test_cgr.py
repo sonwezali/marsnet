@@ -110,3 +110,48 @@ def test_first_hop_window_start_skips_full_window():
                        current_time=0.0, sim_start=SIM_START,
                        volume_used=volume_used)
     assert result.first_hop_window_start == 130.0
+
+
+def test_exclude_node_skips_immediate_bounce_back():
+    # relay <-> rover_a opens at phase 0; relay <-> rover_b opens at phase 10;
+    # rover_a <-> rover_b opens at phase 20 (period 30, duration 10 throughout).
+    contacts = [
+        entry("relay:1", "relay", "rover_a", phase=0,  period=30, duration=10),
+        entry("relay:2", "relay", "rover_b", phase=10, period=30, duration=10),
+        entry("rover_a:1", "rover_a", "rover_b", phase=20, period=30, duration=10),
+    ]
+    # At t=21, a bundle has just arrived at rover_b FROM rover_a (prev_hop="rover_a")
+    # and is bound for "relay". Without exclusion, CGR picks the "faster" route
+    # that bounces straight back through rover_a (arrival=30). With exclusion,
+    # it must use the slower direct route to relay instead (arrival=40).
+    without_exclusion = cgr_route(contacts, source="rover_b", destination="relay",
+                                  current_time=21.0, sim_start=SIM_START)
+    assert without_exclusion.next_hop_contact == "rover_a:1"
+    assert without_exclusion.earliest_arrival == 30
+
+    with_exclusion = cgr_route(contacts, source="rover_b", destination="relay",
+                               current_time=21.0, sim_start=SIM_START,
+                               exclude_node="rover_a")
+    assert with_exclusion is not None
+    assert with_exclusion.next_hop_contact == "relay:2"
+    assert with_exclusion.earliest_arrival == 40
+
+
+def test_exclude_node_does_not_block_unrelated_routes():
+    # When the bundle's previous hop isn't on the path at all, exclude_node
+    # must not change the result.
+    contacts = [entry("base:1", "rover_a", "base", phase=10, period=120, duration=20)]
+    result = cgr_route(contacts, source="rover_a", destination="base",
+                       current_time=0.0, sim_start=SIM_START,
+                       exclude_node="some_other_node")
+    assert result is not None
+    assert result.next_hop_contact == "base:1"
+    assert result.earliest_arrival == 10.0
+
+
+def test_exclude_node_none_is_default_no_filtering():
+    contacts = [entry("base:1", "rover_a", "base", phase=10, period=120, duration=20)]
+    result = cgr_route(contacts, source="rover_a", destination="base",
+                       current_time=0.0, sim_start=SIM_START)
+    assert result is not None
+    assert result.next_hop_contact == "base:1"

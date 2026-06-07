@@ -204,3 +204,30 @@ def test_on_bundle_acked_releases_and_deletes():
     mgr.on_bundle_acked("rover_a:img:0")
     assert store.get("rover_a:img:0") is None
     assert ("base:1", 10.0) not in mgr._volume.used()
+
+
+def test_inject_bundle_passes_prev_hop_as_exclude_node(monkeypatch):
+    mgr, plan, store = make_manager()
+    mock_route = MagicMock(return_value=None)
+    monkeypatch.setattr("marsnet.node.contact_manager.cgr_route", mock_route)
+
+    b = make_bundle()
+    b.prev_hop = "rover_c"
+    mgr.inject_bundle(b)
+
+    _, kwargs = mock_route.call_args
+    assert kwargs.get("exclude_node") == "rover_c"
+
+
+def test_reassign_all_bundles_passes_prev_hop_as_exclude_node(monkeypatch):
+    mgr, plan, store = make_manager()
+    mock_route = MagicMock(return_value=None)
+    monkeypatch.setattr("marsnet.node.contact_manager.cgr_route", mock_route)
+
+    b = make_bundle()
+    b.prev_hop = "rover_c"
+    mgr.bundle_store.insert(b)
+    mgr._reassign_all_bundles()
+
+    _, kwargs = mock_route.call_args
+    assert kwargs.get("exclude_node") == "rover_c"

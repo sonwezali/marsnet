@@ -1,5 +1,6 @@
 # tests/test_connection_handler.py
 from __future__ import annotations
+import base64
 import queue
 import socket
 import threading
@@ -8,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import marsnet.node.protocol as proto
 from marsnet.node.bundle_store import BundleStore
 from marsnet.node.connection_handler import ConnectionHandler
-from marsnet.node.contact_plan import ContactPlan
+from marsnet.node.contact_plan import ContactEntry, ContactPlan
 from marsnet.node.sim_clock import SimClock
 
 
@@ -160,3 +161,36 @@ def test_handshake_does_not_request_plan_when_both_clocks_unset():
     mock_req.assert_not_called()
     mock_send.assert_not_called()
     sock_a.close(); sock_b.close()
+
+
+def test_receive_bundle_stamps_prev_hop_from_contact_other_endpoint():
+    # The handler's node is "rover_a" (per make_handler) and its contact_id is
+    # "base:1". Build a plan where that contact's OTHER endpoint is "base", so
+    # a received bundle must be stamped prev_hop="base" (never "rover_a" — the
+    # handler's own name — and never anything not on the contact).
+    plan = ContactPlan(version=1, sim_start=1000.0, contacts=[
+        ContactEntry(id="base:1", created_by="base", from_node="base",
+                     to_node="rover_a", phase=0.0, period=120.0,
+                     duration=20.0, rate_bps=9600, status="active"),
+    ])
+    clock = SimClock(1000.0)
+    handler, sock_a, sock_b = make_handler(clock, plan)
+
+    # payload is a plain dict here (mirroring make_peer_handshake above) —
+    # _receive_bundle reads it via dict-style p["bundle_id"], not attribute access.
+    msg = proto.Message(
+        type="BUNDLE", sender="base", ts=0.0,
+        payload={
+            "bundle_id": "base:img:0", "src": "base", "dst": "rover_a",
+            "ttl": 300.0, "created_at": 0.0, "image_id": "img",
+            "fragment_offset": 0, "total_size": 4,
+            "data": base64.b64encode(b"data").decode("ascii"),
+        },
+    )
+    handler._receive_bundle(msg)
+
+    received = handler.on_bundle_received.call_args[0][0]
+    assert received.prev_hop == "base"
+
+    sock_a.close()
+    sock_b.close()
