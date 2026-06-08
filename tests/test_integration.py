@@ -1,5 +1,6 @@
 # tests/test_integration.py
 import json, os, subprocess, sys, tempfile, time, pathlib
+from PIL import Image
 
 PYTHON = sys.executable
 ROOT   = pathlib.Path(__file__).parent.parent
@@ -42,10 +43,14 @@ def write_peers(tmp, relay_port, rover_port):
 
 
 def make_test_image(tmp):
-    img = tmp / "test.jpg"
-    # 1024 bytes of test data
-    img.write_bytes(bytes(range(256)) * 4)
-    return str(img)
+    img_path = tmp / "test.jpg"
+    pic = Image.new("RGB", (120, 90))
+    px = pic.load()
+    for y in range(90):
+        for x in range(120):
+            px[x, y] = (x % 256, y % 256, (x + y) % 256)
+    pic.save(str(img_path), format="JPEG", quality=90)
+    return str(img_path)
 
 
 def test_image_delivered_end_to_end():
@@ -93,7 +98,7 @@ def test_image_delivered_end_to_end():
 
         # Wait up to 15s for image to arrive (contact window opens at phase=4)
         deadline = time.time() + 15
-        received = tmp / "received" / "test.jpg"
+        received = tmp / "received" / "rover_a-test.jpg"
         while time.time() < deadline:
             if received.exists():
                 break
@@ -109,4 +114,5 @@ def test_image_delivered_end_to_end():
             f"relay stderr: {relay_stderr[-2000:]}\n"
             f"rover stderr: {rover_stderr[-2000:]}"
         )
-        assert received.stat().st_size > 0
+        with Image.open(received) as got:
+            assert got.size == (120, 90)
