@@ -52,7 +52,7 @@ function handleEvent(ev) {
   }
 }
 
-const CHUNK = 512;
+let previewImageId = null;   // image currently painted in the preview
 
 function base64ToBytes(b64) {
   const bin = atob(b64);
@@ -64,46 +64,36 @@ function base64ToBytes(b64) {
 function trackFragment(ev) {
   const id = ev.image_id;
   let f = imageFragments[id];
-  if (!f) {
-    f = imageFragments[id] = {
-      received: new Set(), total: ev.total_size,
-      buf: new Uint8Array(ev.total_size),
-    };
-  }
-  if (ev.data && !f.received.has(ev.fragment_offset)) {
-    f.buf.set(base64ToBytes(ev.data), ev.fragment_offset);
-  }
-  f.received.add(ev.fragment_offset);
-  updateImagePreview(id);
-}
+  if (!f) f = imageFragments[id] = { received: new Set(), total: ev.tile_count };
+  f.received.add(ev.tile_index);
 
-function updateImagePreview(id) {
-  const f = imageFragments[id];
-  const totalFrags = Math.ceil(f.total / CHUNK);
-  const pct = f.received.size / totalFrags;
   document.getElementById("img-progress").textContent =
-    `${id} — ${Math.round(pct * 100)}% (${f.received.size}/${totalFrags} fragments)`;
+    `${id} — ${Math.round(100 * f.received.size / ev.tile_count)}% ` +
+    `(${f.received.size}/${ev.tile_count} tiles)`;
 
-  // Render the longest contiguous prefix from the start as a JPEG.
-  // A baseline JPEG decodes the rows it has so far, revealing top-to-bottom.
-  let prefixFrags = 0;
-  while (prefixFrags < totalFrags && f.received.has(prefixFrags * CHUNK)) prefixFrags++;
-  const complete = f.received.size === totalFrags;
-  const prefixLen = complete ? f.total : prefixFrags * CHUNK;
-  if (prefixLen <= 0) return;
+  if (!ev.data) return;  // progress-only event (tile not decryptable)
 
-  const blob = new Blob([f.buf.subarray(0, prefixLen)], { type: "image/jpeg" });
-  const url = URL.createObjectURL(blob);
-  const img = new Image();
-  img.onload = () => {
-    const scale = Math.min(256 / img.width, 256 / img.height);
-    const w = img.width * scale, h = img.height * scale;
+  // Clear the canvas when a new image starts painting.
+  if (previewImageId !== id) {
+    previewImageId = id;
     imgCtx.fillStyle = "#1a1a22";
     imgCtx.fillRect(0, 0, 256, 256);
-    imgCtx.drawImage(img, (256 - w) / 2, (256 - h) / 2, w, h);
+  }
+
+  // Fit the full image into 256x256, centered, and place this tile in it.
+  const scale = Math.min(256 / ev.iw, 256 / ev.ih);
+  const ox = (256 - ev.iw * scale) / 2;
+  const oy = (256 - ev.ih * scale) / 2;
+
+  const url = URL.createObjectURL(
+    new Blob([base64ToBytes(ev.data)], { type: "image/jpeg" }));
+  const img = new Image();
+  img.onload = () => {
+    imgCtx.drawImage(img, ox + ev.x * scale, oy + ev.y * scale,
+                     ev.w * scale, ev.h * scale);
     URL.revokeObjectURL(url);
   };
-  img.onerror = () => URL.revokeObjectURL(url);  // truncated prefix: keep last frame
+  img.onerror = () => URL.revokeObjectURL(url);
   img.src = url;
 }
 
