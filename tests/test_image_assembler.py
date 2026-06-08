@@ -1,73 +1,82 @@
 # tests/test_image_assembler.py
+import io
 import os
-import time
 import tempfile
-from marsnet.node.bundle_store import Bundle, BundleStore
+
+from PIL import Image
+
+from marsnet.node.bundle_store import BundleStore
 from marsnet.node.crypto import CryptoManager
-from marsnet.node.image_assembler import ImageAssembler, fragment_image
-
-CHUNK = 64
-
-
-def make_image_data(size=200):
-    return bytes(range(256)) * (size // 256 + 1)
+from marsnet.node.image_assembler import (
+    ImageAssembler, tile_image, _unpack_tile,
+)
 
 
-def test_fragment_reassemble_roundtrip():
+def make_image(w=100, h=80):
+    """A deterministic RGB gradient image, returned as JPEG bytes."""
+    img = Image.new("RGB", (w, h))
+    px = img.load()
+    for y in range(h):
+        for x in range(w):
+            px[x, y] = (x % 256, y % 256, (x + y) % 256)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=90)
+    return buf.getvalue()
+
+
+def test_tile_image_grid_and_geometry():
     crypto = CryptoManager.generate()
-    raw = make_image_data(200)
-    bundles = fragment_image(
-        image_path=None, raw_data=raw,
-        src="rover_a", dst="base", ttl=120.0,
-        image_id="img001", chunk_size=CHUNK, crypto=crypto,
+    raw = make_image(100, 80)  # tile_px=64 -> cols=2, rows=2 -> 4 tiles
+    bundles = tile_image(
+        src="rover_a", dst="relay", ttl=120.0, image_id="img001",
+        crypto=crypto, tile_px=64, raw_data=raw,
     )
-    assert len(bundles) == -(-200 // CHUNK)  # ceil div
+    assert len(bundles) == 4
+    assert {b.fragment_offset for b in bundles} == {0, 1, 2, 3}
+    assert all(b.total_size == 4 for b in bundles)
 
+    # First tile: full 64x64 at origin; header reports the whole image size.
+    h0, jpeg0 = _unpack_tile(crypto.decrypt(bundles[0].data))
+    assert (h0["iw"], h0["ih"]) == (100, 80)
+    assert (h0["x"], h0["y"], h0["w"], h0["h"]) == (0, 0, 64, 64)
+    assert jpeg0[:2] == b"\xff\xd8"  # JPEG SOI marker
+
+    # Right-edge tile (idx 1) is narrower; bottom-edge tile (idx 2) is shorter.
+    h1, _ = _unpack_tile(crypto.decrypt(bundles[1].data))
+    assert (h1["x"], h1["w"]) == (64, 36)
+    h2, _ = _unpack_tile(crypto.decrypt(bundles[2].data))
+    assert (h2["y"], h2["h"]) == (64, 16)
+
+
+def test_reassemble_writes_full_image():
+    crypto = CryptoManager.generate()
+    raw = make_image(120, 90)
+    bundles = tile_image(src="rover_a", dst="relay", ttl=120.0,
+                         image_id="img002", crypto=crypto, raw_data=raw)
     with tempfile.TemporaryDirectory() as out_dir:
         store = BundleStore()
         for b in bundles:
             store.insert(b)
-        assembler = ImageAssembler(store, crypto, out_dir, chunk_size=CHUNK)
+        assembler = ImageAssembler(store, crypto, out_dir)
+        result = None
         for b in bundles:
             result = assembler.on_fragment(b.image_id)
         assert result is not None
-        with open(result, "rb") as f:
-            assert f.read() == raw
+        with Image.open(result) as got:
+            assert got.size == (120, 90)
 
 
 def test_partial_returns_none():
     crypto = CryptoManager.generate()
-    raw = make_image_data(200)
-    bundles = fragment_image(raw_data=raw, src="rover_a", dst="base",
-                             ttl=120.0, image_id="img002",
-                             chunk_size=CHUNK, crypto=crypto)
-    # bundles has 4 fragments at offsets 0, 64, 128, 192
+    raw = make_image(120, 90)
+    bundles = tile_image(src="rover_a", dst="relay", ttl=120.0,
+                         image_id="img003", crypto=crypto, raw_data=raw)
     with tempfile.TemporaryDirectory() as out_dir:
         store = BundleStore()
-        # Insert fragments 0, 1, and 3 - missing fragment at offset 128
-        store.insert(bundles[0])
-        store.insert(bundles[1])
-        store.insert(bundles[3])
-        assembler = ImageAssembler(store, crypto, out_dir, chunk_size=CHUNK)
-        result = assembler.on_fragment("img002")
-        assert result is None
-
-
-def test_non_adjacent_fragments_not_prematurely_complete():
-    crypto = CryptoManager.generate()
-    raw = make_image_data(200)
-    bundles = fragment_image(raw_data=raw, src="rover_a", dst="base",
-                             ttl=120.0, image_id="img003",
-                             chunk_size=CHUNK, crypto=crypto)
-    # bundles has 4 fragments at offsets 0, 64, 128, 192
-    with tempfile.TemporaryDirectory() as out_dir:
-        store = BundleStore()
-        # Insert only non-adjacent fragments 0 and 128
-        store.insert(bundles[0])
-        store.insert(bundles[2])
-        assembler = ImageAssembler(store, crypto, out_dir, chunk_size=CHUNK)
-        result = assembler.on_fragment("img003")
-        assert result is None
+        for b in bundles[:-1]:  # drop the last tile
+            store.insert(b)
+        assembler = ImageAssembler(store, crypto, out_dir)
+        assert assembler.on_fragment("img003") is None
 
 
 def test_init_creates_missing_output_dir():
@@ -76,7 +85,7 @@ def test_init_creates_missing_output_dir():
     with tempfile.TemporaryDirectory() as base_dir:
         out_dir = os.path.join(base_dir, "received_images")
         assert not os.path.isdir(out_dir)
-        ImageAssembler(store, crypto, out_dir, chunk_size=CHUNK)
+        ImageAssembler(store, crypto, out_dir)
         assert os.path.isdir(out_dir)
 
 
@@ -85,6 +94,5 @@ def test_init_tolerates_already_existing_output_dir():
     store = BundleStore()
     with tempfile.TemporaryDirectory() as out_dir:
         assert os.path.isdir(out_dir)
-        # must not raise even though the directory already exists
-        ImageAssembler(store, crypto, out_dir, chunk_size=CHUNK)
+        ImageAssembler(store, crypto, out_dir)  # must not raise
         assert os.path.isdir(out_dir)
