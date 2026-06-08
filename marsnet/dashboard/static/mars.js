@@ -26,8 +26,6 @@ const imgCtx    = imgCanvas.getContext("2d");
 
 // ── WebSocket ─────────────────────────────────────────────────────────
 const ws = new WebSocket(`ws://${location.host}/ws`);
-ws.onopen  = () => document.getElementById("status").textContent = "● live";
-ws.onclose = () => document.getElementById("status").textContent = "○ disconnected";
 
 ws.onmessage = (e) => {
   const ev = JSON.parse(e.data);
@@ -142,7 +140,7 @@ function drawNodes() {
 
     // Label
     ctx.fillStyle = failed ? "#555" : "#e0d8c8";
-    ctx.font = "10px monospace";
+    ctx.font = "13px monospace";
     ctx.textAlign = "center";
     ctx.fillText(n.label, pos.x, pos.y + RADIUS + 14);
   }
