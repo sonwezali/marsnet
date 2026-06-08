@@ -16,7 +16,7 @@ from marsnet.node.tcp_listener import TCPListener
 from marsnet.node.udp_listener import UDPListener
 from marsnet.node.hello_broadcaster import HELLOBroadcaster
 from marsnet.node.ttl_reaper import TTLReaper
-from marsnet.node.image_assembler import fragment_image, ImageAssembler
+from marsnet.node.image_assembler import tile_image, ImageAssembler, _unpack_tile
 from marsnet.node.dashboard_reporter import DashboardReporter
 
 
@@ -38,7 +38,7 @@ class NodeCLI:
             image_id = f"{self._cfg.name}-{stem}_{counter}"
             counter += 1
 
-        bundles = fragment_image(
+        bundles = tile_image(
             image_path=path, src=self._cfg.name,
             dst="relay", ttl=self._ttl,
             image_id=image_id, crypto=self._crypto,
@@ -110,14 +110,16 @@ def main():
             assembler.on_fragment(bundle.image_id)
             evt = {
                 "image_id": bundle.image_id,
-                "fragment_offset": bundle.fragment_offset,
-                "total_size": bundle.total_size,
+                "tile_index": bundle.fragment_offset,
+                "tile_count": bundle.total_size,
                 "ts": sim_clock.sim_time(),
             }
             try:
-                evt["data"] = base64.b64encode(crypto.decrypt(bundle.data)).decode()
+                header, jpeg = _unpack_tile(crypto.decrypt(bundle.data))
+                evt.update(header)  # iw, ih, x, y, w, h
+                evt["data"] = base64.b64encode(jpeg).decode()
             except Exception:
-                pass  # undecryptable fragment: still report progress, no pixels
+                pass  # undecryptable tile: still report progress, no pixels
             reporter.post("fragment_received", evt)
         else:
             contact_mgr.inject_bundle(bundle)

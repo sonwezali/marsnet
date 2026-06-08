@@ -5,13 +5,15 @@ import pathlib
 import tempfile
 import pytest
 
+from PIL import Image
+
 from marsnet.node.bundle_store import BundleStore
 from marsnet.node.config import NodeConfig
 from marsnet.node.crypto import CryptoManager
+from marsnet.node.image_assembler import TILE_PX
 from marsnet.node.main import NodeCLI
 
 TTL = 300.0
-CHUNK_SIZE = 512
 REPO_ROOT = pathlib.Path(__file__).parent.parent
 
 
@@ -32,27 +34,36 @@ def make_cli(cfg: NodeConfig | None = None):
     return NodeCLI(cfg=cfg, store=store, inject_fn=inject, crypto=crypto, ttl=TTL), store
 
 
-def make_image(size_bytes: int = 1024) -> str:
+def make_image(w: int = 100, h: int = 80) -> str:
+    """Write a real, decodable JPEG and return its path."""
     f = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
-    f.write(os.urandom(size_bytes))
     f.close()
+    img = Image.new("RGB", (w, h))
+    px = img.load()
+    for y in range(h):
+        for x in range(w):
+            px[x, y] = (x % 256, y % 256, (x + y) % 256)
+    img.save(f.name, format="JPEG", quality=90)
     return f.name
+
+
+def tile_count(w: int, h: int) -> int:
+    return math.ceil(w / TILE_PX) * math.ceil(h / TILE_PX)
 
 
 def test_send_inserts_correct_fragment_count():
     cli, store = make_cli()
-    path = make_image(1024)
+    path = make_image(100, 80)
     try:
         cli.send(path)
-        expected = math.ceil(1024 / CHUNK_SIZE)
-        assert len(store.all()) == expected
+        assert len(store.all()) == tile_count(100, 80)
     finally:
         os.unlink(path)
 
 
 def test_send_sets_destination_to_relay():
     cli, store = make_cli()
-    path = make_image(512)
+    path = make_image(64, 64)
     try:
         cli.send(path)
         assert all(b.dst == "relay" for b in store.all())
@@ -62,14 +73,14 @@ def test_send_sets_destination_to_relay():
 
 def test_send_duplicate_filename_appends_suffix():
     cli, store = make_cli()
-    path = make_image(512)
+    path = make_image(64, 64)
     try:
         cli.send(path)
         cli.send(path)
         image_ids = {b.image_id for b in store.all()}
         stem = os.path.splitext(os.path.basename(path))[0]
-        assert stem in image_ids
-        assert f"{stem}_2" in image_ids
+        assert f"rover_a-{stem}" in image_ids
+        assert f"rover_a-{stem}_2" in image_ids
     finally:
         os.unlink(path)
 
@@ -82,10 +93,10 @@ def test_send_missing_file_raises():
 
 def test_status_reflects_sent_count(capsys):
     cli, store = make_cli()
-    path = make_image(1024)
+    path = make_image(100, 80)
     try:
         cli.send(path)
-        total = math.ceil(1024 / CHUNK_SIZE)
+        total = tile_count(100, 80)
         bundles = store.all()
         for b in bundles[:total // 2]:
             store.delete(b.bundle_id)
@@ -98,7 +109,7 @@ def test_status_reflects_sent_count(capsys):
 
 def test_status_shows_complete_when_all_sent(capsys):
     cli, store = make_cli()
-    path = make_image(512)
+    path = make_image(64, 64)
     try:
         cli.send(path)
         for b in store.all():
